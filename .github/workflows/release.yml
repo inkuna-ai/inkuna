@@ -1,0 +1,75 @@
+# A v* tag on main is a release, which inkunactl update's stable channel
+# follows. This checks the tag and publishes the release's notes: the titles
+# of the pull requests merged since the previous release. It builds nothing;
+# inkunactl install and update build from source.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Every commit and tag, for the notes and the check that the tag
+          # is on main.
+          fetch-depth: 0
+
+      - name: Check the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A pre-release such as v1.0.0-rc.1 is not one the stable channel
+          # follows, so it is not published as a release either.
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$TAG is not vX.Y.Z, so it is not a release."
+            exit 1
+          fi
+          # The packaged app shows wails.json's version, kept equal to the
+          # frontend's (package_test.go).
+          for file in wails.json frontend/package.json; do
+            case "$file" in
+              wails.json) declared="$(jq -r .info.productVersion "$file")" ;;
+              *) declared="$(jq -r .version "$file")" ;;
+            esac
+            if [ "v$declared" != "$TAG" ]; then
+              echo "::error file=$file::$file says $declared, but the tag is $TAG. Bump both versions on main, then tag that commit."
+              exit 1
+            fi
+          done
+          # inkunactl update follows only tags on main.
+          if ! git merge-base --is-ancestor "$TAG" origin/main; then
+            echo "::error::$TAG is not on main, so inkunactl update would not follow it."
+            exit 1
+          fi
+
+      - name: Write the notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          previous="$(git tag --list --merged "$TAG^" --sort=-v:refname 'v*' 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+          range="$TAG"
+          if [ -n "$previous" ]; then
+            range="$previous..$TAG"
+            echo "Merged since $previous:" > notes.md
+          else
+            echo "The first release of Inkuna." > notes.md
+          fi
+          echo >> notes.md
+          # Pull requests are squash-merged under their titles, so each
+          # first-parent subject is one.
+          git log --first-parent --format='- %s' "$range" >> notes.md
+          cat notes.md
+
+      - name: Publish the release
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$TAG" --verify-tag --title "Inkuna $TAG" --notes-file notes.md

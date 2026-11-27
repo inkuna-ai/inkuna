@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a2429"/>
+      <stop offset="1" stop-color="#0b1013"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.5">
+      <stop offset="0" stop-color="#ffb25b" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffb25b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- macOS-style tile with the standard 100px margin -->
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#tile)"/>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#glow)"/>
+  <rect x="106" y="106" width="812" height="812" rx="180" fill="none" stroke="#39464b" stroke-width="6" opacity="0.6"/>
+  <!-- the base: an open arc that holds the workflow -->
+  <path d="M 226 480 A 290 290 0 0 0 798 480" fill="none" stroke="#ffb25b" stroke-width="64" stroke-linecap="round"/>
+  <!-- the workflow: a request fans out to parallel stages and lands back in the arc -->
+  <g stroke="#6b7b80" stroke-width="22" stroke-linecap="round" fill="none">
+    <path d="M 512 318 L 392 462"/>
+    <path d="M 512 318 L 632 462"/>
+    <path d="M 392 462 L 512 606"/>
+    <path d="M 632 462 L 512 606"/>
+  </g>
+  <circle cx="392" cy="462" r="44" fill="#dce4e5"/>
+  <circle cx="632" cy="462" r="44" fill="#dce4e5"/>
+  <circle cx="512" cy="606" r="44" fill="#dce4e5"/>
+  <circle cx="512" cy="318" r="58" fill="#ffb25b"/>
+</svg>

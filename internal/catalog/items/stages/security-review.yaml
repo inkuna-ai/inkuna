@@ -1,0 +1,8 @@
+# Reviews the change for security problems with the security-reviewer, read-only.
+version: 2
+stages:
+  security-review:
+    kind: agent
+    title: Review the change for security
+    agent: security-reviewer
+    permission: read-only

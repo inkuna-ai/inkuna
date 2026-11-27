@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="{{.Policy}}">
+<meta name="color-scheme" content="dark">
+<title>{{.Page.Title}} · {{.Page.ScopeLabel}} · Inkuna</title>
+<style>{{.Style}}</style>
+</head>
+<body class="{{if .Page.Split}}layout-split{{else}}layout-unified{{end}}" data-run="{{.Page.RunID}}">
+<header class="top">
+<p class="eyebrow">Inkuna · run {{.Page.RunID}}</p>
+<h1>{{.Page.Title}}</h1>
+<p class="meta">{{.Page.Branch}} · from {{.Page.Base}} · {{.Page.ScopeLabel}}</p>
+<p class="summary"><strong>{{plural (len .Page.Files) "file" "files"}} changed</strong>, <span class="add">+{{.Page.Additions}}</span> <span class="del">−{{.Page.Deletions}}</span>{{if .Page.Total}} · <a class="checks-summary {{tone .Page.Failed .Page.Passed .Page.Total}}" href="#checks">{{.Page.Passed}} of {{.Page.Total}} checks passed</a>{{end}}</p>
+{{- with .Page.Commit}}
+<div class="commit">
+<p class="commit-label">{{.ShortHash}}{{if .External}} · external{{else}} · step {{.StepID}}{{with .Agent}} · {{.}}{{end}}{{end}}</p>
+<p class="commit-subject">{{.Subject}}</p>
+<p class="commit-meta">{{.Author}} · {{.Date}}</p>
+{{- with .Body}}
+<pre class="commit-body">{{.}}</pre>
+{{- end}}
+</div>
+{{- end}}
+<div class="toolbar">
+<input type="search" id="filter" placeholder="Filter files…" aria-label="Filter changed files">
+<span class="layout" role="group" aria-label="Layout"><button type="button" data-layout="unified">Unified</button><button type="button" data-layout="split">Split</button></span>
+<span id="viewed" class="muted"></span>
+<span class="muted keys">j / k: next and previous file · v: viewed</span>
+</div>
+</header>
+<main class="page">
+<nav class="tree" aria-label="Changed files">{{template "tree" .Page.Tree}}</nav>
+<div class="files">
+{{- range .Page.Files}}
+<section class="file" id="{{.Anchor}}" data-path="{{.Path}}{{with .OldPath}} {{.}}{{end}}" data-blob="{{.Blob}}">
+<details{{if not .Generated}} open{{end}}>
+<summary><span class="status s-{{.Status}}" title="{{.Status}}">{{.Letter}}</span><span class="path">{{with .OldPath}}{{.}} → {{end}}{{.Path}}</span>{{if .Generated}}<span class="chip">generated</span>{{end}}<span class="counts"><span class="add">+{{.Additions}}</span> <span class="del">−{{.Deletions}}</span></span></summary>
+{{- if .Note}}
+<p class="note">{{.Note}}</p>
+{{- else}}
+<table class="inkuna-diff unified"><colgroup><col class="c-num"><col class="c-num"><col class="c-marker"><col></colgroup><tbody>
+{{- range .Unified}}
+{{- if .Hunk}}<tr class="hunk"><td colspan="4">{{.Hunk}}</td></tr>
+{{- else}}<tr class="line-{{.Kind}}"><td class="num">{{.Old}}</td><td class="num">{{.New}}</td><td class="marker">{{.Marker}}</td><td class="code">{{template "spans" .Spans}}{{template "eol" .NoNewline}}</td></tr>
+{{- range .Threads}}<tr class="thread-row"><td colspan="4">{{template "thread" .}}</td></tr>{{end}}
+{{- end}}
+{{- end}}
+</tbody></table>
+<table class="inkuna-diff split"><colgroup><col class="c-num"><col class="c-marker"><col><col class="c-num"><col class="c-marker"><col></colgroup><tbody>
+{{- range .Split}}
+{{- if .Hunk}}<tr class="hunk"><td colspan="6">{{.Hunk}}</td></tr>
+{{- else}}<tr>{{template "side" .Left}}{{template "side" .Right}}</tr>
+{{- range .Threads}}<tr class="thread-row"><td colspan="6">{{template "thread" .}}</td></tr>{{end}}
+{{- end}}
+{{- end}}
+</tbody></table>
+{{- end}}
+</details>
+<label class="viewed"><input type="checkbox" data-viewed> Viewed</label>
+</section>
+{{- end}}
+</div>
+</main>
+{{- if .Page.Comments}}
+<section class="comments" id="comments" aria-label="Comments">
+<h2>Comments <span class="muted">outdated, or not on these lines</span></h2>
+{{- range .Page.Comments}}
+{{template "thread" .}}
+{{- end}}
+</section>
+{{- end}}
+{{- if .Page.Commits}}
+<section class="commits" aria-label="Commits">
+<h2>Commits</h2>
+<ol>
+{{- range .Page.Commits}}
+<li><code>{{.ShortHash}}</code><span class="subject">{{.Subject}}</span>{{if .Merge}}<span class="chip">merge</span>{{end}}<span class="who">{{if .External}}<span class="chip warn">external</span>{{else}}step <b>{{.StepID}}</b>{{with .Agent}} · {{.}}{{end}}{{end}}</span><span class="muted">{{.Author}} · {{.Date}}</span><span class="counts">{{plural .Files "file" "files"}} <span class="add">+{{.Additions}}</span> <span class="del">−{{.Deletions}}</span></span></li>
+{{- end}}
+</ol>
+</section>
+{{- end}}
+{{- if .Page.Checks}}
+<section class="checks" id="checks" aria-label="Checks">
+<h2>Checks <span class="muted">{{.Page.Passed}} of {{.Page.Total}} passed</span></h2>
+<ol>
+{{- range .Page.Checks}}
+<li class="check c-{{.Status}}"><div class="check-row"><span class="mark">{{mark .Status}}</span><code>{{.Command}}</code><span class="muted">{{.Step}} · {{.Status}}</span>{{if eq .Status "failed"}}{{with .ExitCode}}<span class="exit">exit {{.}}</span>{{end}}{{end}}{{with .Error}}<span class="exit">{{.}}</span>{{end}}{{with .Duration}}<span class="muted">{{.}}</span>{{end}}</div>
+{{- if .Log}}
+<details><summary>Log{{if .LogCut}} (the command wrote more; the log keeps its first and last part){{end}}</summary><pre class="log">
+{{- range .Log}}<span class="ln"><span class="n">{{.Number}}</span>{{template "spans" .Spans}}</span>
+{{end}}</pre></details>
+{{- end}}
+</li>
+{{- end}}
+</ol>
+</section>
+{{- end}}
+<footer class="muted">Made by inkunactl diff{{with .Page.Generated}} at {{.}}{{end}}. It loads nothing from the network.</footer>
+<script>{{.Script}}</script>
+</body>
+</html>
+{{define "thread"}}<div class="thread"><p class="thread-head"><span class="place">{{.Place}}</span>{{with .Resolved}}<span class="chip ok">{{.}}</span>{{end}}{{with .Outdated}}<span class="chip">{{.}}</span>{{end}}</p>{{with .Excerpt}}<pre class="excerpt">{{.}}</pre>{{end}}{{range .Comments}}<div class="comment"><p class="comment-head"><code>{{.Item}}</code> round {{.Round}} · for {{.Target}}</p><p class="body">{{.Body}}</p><p class="reply r-{{or .Status "open"}}"><b>{{.Target}}</b> {{or .Reply "has not replied yet"}}{{with .Note}}: {{.}}{{end}}</p></div>{{end}}</div>{{end}}
+{{define "spans"}}{{range .}}{{if .Class}}<span class="{{.Class}}">{{.Text}}</span>{{else}}{{.Text}}{{end}}{{end}}{{end}}
+{{define "eol"}}{{if .}}<abbr class="no-newline" title="No newline at end of file">⊘</abbr>{{end}}{{end}}
+{{define "side"}}{{if .}}<td class="num line-{{.Kind}}">{{.Number}}</td><td class="marker line-{{.Kind}}">{{.Marker}}</td><td class="code line-{{.Kind}}">{{template "spans" .Spans}}{{template "eol" .NoNewline}}</td>{{else}}<td class="empty" colspan="3"></td>{{end}}{{end}}
+{{define "tree"}}<ul>{{range .}}<li>{{if .Folder}}<span class="folder">{{.Name}}/</span>{{template "tree" .Children}}{{else}}<a href="#{{.File.Anchor}}" data-path="{{.Path}}{{with .File.OldPath}} {{.}}{{end}}"><span class="status s-{{.File.Status}}">{{.File.Letter}}</span><span class="name">{{.Name}}</span><span class="counts"><span class="add">+{{.File.Additions}}</span> <span class="del">−{{.File.Deletions}}</span></span></a>{{end}}</li>{{end}}</ul>{{end}}

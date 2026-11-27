@@ -1,0 +1,589 @@
+/* Inkuna's dark tokens (frontend/src/index.css), so the page reads like
+   the app without loading anything. */
+:root {
+  color-scheme: dark;
+  --color-canvas: #0d1215;
+  --color-panel: #131a1e;
+  --color-raised: #172024;
+  --color-field: #0e1417;
+  --color-line: #263137;
+  --color-line-strong: #39464b;
+  --color-ink: #dce4e5;
+  --color-ink-strong: #f4f6f6;
+  --color-ink-soft: #aab5b7;
+  --color-muted: #819095;
+  --color-faint: #69777b;
+  --color-accent: #ffb25b;
+  --color-ok: #6bcf9b;
+  --color-warn: #ffd27a;
+  --color-danger: #ff8c84;
+  --color-series-1: #3987e5;
+  --color-series-3: #199e70;
+  --color-series-4: #c98500;
+  --color-series-7: #9085e9;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font: 14px/1.5 var(--sans);
+}
+a {
+  color: inherit;
+}
+.muted {
+  color: var(--color-muted);
+}
+.add {
+  color: var(--color-ok);
+}
+.del {
+  color: var(--color-danger);
+}
+code,
+.counts,
+.num,
+.marker,
+.code,
+.log,
+.path,
+.commit-label {
+  font-family: var(--mono);
+}
+header.top,
+main.page,
+section.commits,
+section.checks,
+section.comments,
+footer {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+header.top {
+  padding-top: 32px;
+}
+.eyebrow {
+  margin: 0;
+  color: var(--color-accent);
+  font: 11px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+h1 {
+  margin: 6px 0 4px;
+  font-size: 22px;
+}
+h2 {
+  margin: 32px 0 12px;
+  font-size: 16px;
+}
+.meta {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.summary {
+  margin: 12px 0;
+}
+.checks-summary {
+  text-decoration: none;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 12px;
+}
+.tone-ok {
+  color: var(--color-ok);
+}
+.tone-failed {
+  color: var(--color-danger);
+}
+.commit {
+  background: var(--color-field);
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+.commit p {
+  margin: 2px 0;
+}
+.commit-label {
+  color: var(--color-accent);
+  font-size: 11px;
+}
+.commit-meta {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.commit-body {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  font: 12px/1.5 var(--mono);
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 16px;
+  font-size: 12px;
+}
+.toolbar input {
+  width: 240px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 4px;
+  background: var(--color-field);
+  color: var(--color-ink-strong);
+}
+.layout {
+  display: inline-flex;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.layout button {
+  border: 0;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--color-ink-soft);
+  cursor: pointer;
+}
+.layout-unified .layout [data-layout="unified"],
+.layout-split .layout [data-layout="split"] {
+  background: var(--color-raised);
+  color: var(--color-ink-strong);
+}
+main.page {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+nav.tree {
+  position: sticky;
+  top: 0;
+  max-height: 100vh;
+  overflow: auto;
+  padding: 4px 0;
+  font-size: 12px;
+}
+/* After the rules it overrides, which would otherwise win: in one column
+   a sticky tree would cover the diffs scrolling under it. */
+@media (max-width: 760px) {
+  main.page {
+    grid-template-columns: 1fr;
+  }
+  nav.tree {
+    position: static;
+    max-height: none;
+  }
+}
+nav.tree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 12px;
+}
+nav.tree > ul {
+  padding-left: 0;
+}
+nav.tree a {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 4px;
+  border-radius: 3px;
+  text-decoration: none;
+}
+nav.tree a:hover,
+nav.tree a.current {
+  background: var(--color-raised);
+}
+nav.tree a.current {
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+nav.tree .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+nav.tree .folder {
+  color: var(--color-ink-soft);
+}
+.viewed-file > a .name,
+.viewed-file .name {
+  color: var(--color-muted);
+}
+.files {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+section.file {
+  position: relative;
+  border: 1px solid var(--color-line);
+  background: var(--color-field);
+  min-width: 0;
+}
+section.file summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 110px 6px 10px;
+  background: var(--color-raised);
+  border-bottom: 1px solid var(--color-line);
+  cursor: pointer;
+  font-size: 12px;
+}
+section.file .path {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-ink-strong);
+}
+label.viewed {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--color-ink-soft);
+}
+.status {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 3px;
+  font: 9px var(--mono);
+}
+.s-added {
+  color: var(--color-ok);
+}
+.s-modified {
+  color: var(--color-warn);
+}
+.s-deleted {
+  color: var(--color-danger);
+}
+.s-renamed,
+.s-copied {
+  color: var(--color-ink-soft);
+}
+.chip {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  padding: 0 6px;
+  font: 9px var(--mono);
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+.chip.warn {
+  color: var(--color-warn);
+}
+.note {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+table.inkuna-diff {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font: 12px/20px var(--mono);
+}
+.layout-unified table.split,
+.layout-split table.unified {
+  display: none;
+}
+/* A fixed table takes its widths from its columns, not from a hunk
+   header that spans them all. */
+col.c-num {
+  width: 7ch;
+}
+col.c-marker {
+  width: 2.5ch;
+}
+table.inkuna-diff td {
+  padding: 0;
+  vertical-align: top;
+}
+td.num {
+  padding: 0 6px;
+  text-align: right;
+  color: var(--color-faint);
+  user-select: none;
+}
+td.marker {
+  text-align: center;
+  color: var(--color-muted);
+  user-select: none;
+}
+td.code {
+  padding-right: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.no-newline {
+  margin-left: 4px;
+  color: var(--color-danger);
+  text-decoration: none;
+  cursor: help;
+}
+td.empty {
+  background: color-mix(in srgb, var(--color-canvas) 60%, transparent);
+}
+tr.hunk td {
+  padding: 0 12px;
+  background: var(--color-panel);
+  color: var(--color-muted);
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+}
+.hidden {
+  display: none !important;
+}
+section.commits ol,
+section.checks ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-line);
+  background: var(--color-field);
+}
+section.commits li,
+section.checks li {
+  border-bottom: 1px solid var(--color-line);
+  padding: 6px 10px;
+  font-size: 12px;
+}
+section.commits li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+section.commits li:last-child,
+section.checks li:last-child {
+  border-bottom: 0;
+}
+section.commits code {
+  color: var(--color-accent);
+}
+section.commits .subject {
+  flex: 1;
+  min-width: 200px;
+}
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+.mark {
+  width: 1em;
+  text-align: center;
+}
+.c-passed .mark {
+  color: var(--color-ok);
+}
+.c-failed .mark,
+.exit {
+  color: var(--color-danger);
+}
+.c-cancelled .mark {
+  color: var(--color-warn);
+}
+.c-skipped .mark,
+.c-queued .mark {
+  color: var(--color-faint);
+}
+section.checks details {
+  margin-top: 6px;
+}
+section.checks summary {
+  cursor: pointer;
+  color: var(--color-ink-soft);
+}
+pre.log {
+  margin: 6px 0 0;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 6px 0;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-line);
+  font: 11px/20px var(--mono);
+}
+pre.log .ln {
+  display: inline;
+}
+pre.log .n {
+  display: inline-block;
+  width: 6ch;
+  padding-right: 8px;
+  text-align: right;
+  color: var(--color-faint);
+  user-select: none;
+}
+footer {
+  padding-top: 32px;
+  padding-bottom: 48px;
+  font-size: 12px;
+}
+/* ANSI colours in check logs, as the app maps them onto its tokens. */
+.ansi-fg-0,
+.ansi-fg-8 {
+  color: var(--color-muted);
+}
+.ansi-fg-1,
+.ansi-fg-9 {
+  color: var(--color-danger);
+}
+.ansi-fg-2,
+.ansi-fg-10 {
+  color: var(--color-ok);
+}
+.ansi-fg-3,
+.ansi-fg-11 {
+  color: var(--color-warn);
+}
+.ansi-fg-4,
+.ansi-fg-12 {
+  color: var(--color-series-1);
+}
+.ansi-fg-5,
+.ansi-fg-13 {
+  color: var(--color-series-7);
+}
+.ansi-fg-6,
+.ansi-fg-14 {
+  color: var(--color-series-3);
+}
+.ansi-fg-7 {
+  color: var(--color-ink);
+}
+.ansi-fg-15 {
+  color: var(--color-ink-strong);
+}
+.ansi-bg-1,
+.ansi-bg-9 {
+  background: color-mix(in srgb, var(--color-danger) 28%, transparent);
+}
+.ansi-bg-2,
+.ansi-bg-10 {
+  background: color-mix(in srgb, var(--color-ok) 28%, transparent);
+}
+.ansi-bg-3,
+.ansi-bg-11 {
+  background: color-mix(in srgb, var(--color-warn) 28%, transparent);
+}
+.ansi-bg-4,
+.ansi-bg-12 {
+  background: color-mix(in srgb, var(--color-series-1) 28%, transparent);
+}
+.ansi-bg-5,
+.ansi-bg-13 {
+  background: color-mix(in srgb, var(--color-series-7) 28%, transparent);
+}
+.ansi-bg-6,
+.ansi-bg-14 {
+  background: color-mix(in srgb, var(--color-series-3) 28%, transparent);
+}
+.ansi-bg-0,
+.ansi-bg-7,
+.ansi-bg-8,
+.ansi-bg-15 {
+  background: color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+.ansi-bold {
+  font-weight: 700;
+}
+
+/* Comment threads, read only: under their line in the diff, or listed. */
+tr.thread-row > td {
+  padding: 0;
+}
+.thread {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-block: 1px solid var(--color-line);
+  background: var(--color-raised);
+  font: 12px/1.55 var(--sans);
+  white-space: normal;
+}
+section.comments .thread {
+  margin-bottom: 12px;
+  border: 1px solid var(--color-line);
+}
+.thread p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.thread-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.thread-head .place {
+  font-family: var(--mono);
+  color: var(--color-ink-soft);
+}
+.chip.ok {
+  color: var(--color-ok);
+}
+.thread .excerpt {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  background: var(--color-field);
+  font: 11px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.comment {
+  display: grid;
+  gap: 2px;
+}
+.comment-head {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+.comment-head code {
+  color: var(--color-accent);
+}
+.comment .body {
+  white-space: pre-wrap;
+}
+.comment .reply {
+  padding-left: 8px;
+  border-left: 2px solid var(--color-line-strong);
+  color: var(--color-ink-soft);
+  white-space: pre-wrap;
+}
+.reply.r-fixed {
+  border-left-color: var(--color-ok);
+}
+.reply.r-declined {
+  border-left-color: var(--color-warn);
+}
+.reply.r-question {
+  border-left-color: var(--color-accent);
+}

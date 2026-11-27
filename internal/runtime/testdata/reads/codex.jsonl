@@ -1,0 +1,10 @@
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"I’ll read the files and search for TODO in the requested order.\n"}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -lc 'cat docs/guide.md'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -lc 'cat docs/guide.md'","aggregated_output":"# Guide\n\nTODO: describe the guide.\n","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc 'cat docs/notes/setup.md'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_4","type":"command_execution","command":"/bin/zsh -lc 'cat docs/notes/setup.md'","aggregated_output":"# Setup\n\nRun task bootstrap.\n","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_5","type":"command_execution","command":"/bin/zsh -lc 'rg -n -w TODO docs'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_5","type":"command_execution","command":"/bin/zsh -lc 'rg -n -w TODO docs'","aggregated_output":"docs/guide.md:3:TODO: describe the guide.\n","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_6","type":"command_execution","command":"/bin/zsh -lc 'cat src/app.go'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_6","type":"command_execution","command":"/bin/zsh -lc 'cat src/app.go'","aggregated_output":"package app\n\n// TODO: nothing yet\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_7","type":"agent_message","text":"{\"status\":\"completed\",\"summary\":\"Read all three files in order using the shell; found one TODO in docs/guide.md.\"}"}}

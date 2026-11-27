@@ -1,0 +1,219 @@
+# Inkuna's own flows. Inkuna plans changes to itself from this file exactly as
+# it would for any other repository (docs/inkuna-directory.md).
+#
+# This file replaces the built-in rules, so the built-in bugfix and read-only
+# flows are restated here. Every agent stage attaches the conventions skill:
+# it is the only way the conventions reach every runtime, because Copilot
+# workers do not read AGENTS.md. internal/planner/self_test.go enforces it.
+#
+# Verification runs task deps first because a fresh worktree has no
+# frontend/node_modules, then task ci, the handoff gate.
+version: 1
+rules:
+  - name: inkuna-directory
+    description: Changes to Inkuna's own rules, agents, skills, and branching config, checked by the self-tests.
+    when:
+      kind: [skill-authoring]
+    then:
+      stages:
+        - id: profile
+          kind: script
+        - id: author
+          title: Update the .inkuna directory
+          kind: agent
+          agent: auto
+          permission: worktree-write
+          allowedPaths: [.inkuna/, docs/, CLAUDE.md, AGENTS.md]
+          skills: [conventions, design-docs]
+          commands:
+            - [go, test, ./internal/planner/..., ./internal/docs/..., ./internal/branching/...]
+          dependsOn: [profile]
+        - id: verify
+          kind: evaluation
+          commands:
+            - [go, test, ./internal/planner/..., ./internal/docs/..., ./internal/branching/..., ./internal/agent/..., ./internal/skill/..., ./internal/rules/...]
+          dependsOn: [author]
+        - id: approval
+          kind: approval
+          dependsOn: [verify]
+
+  - name: security
+    description: Changes near secrets, permissions, or sandboxing get a security review before verification.
+    when:
+      kind: [implementation, bugfix]
+      keywords: [secret, keychain, credential, sandbox, permission, trust boundary]
+    then:
+      stages:
+        - id: profile
+          kind: script
+        - id: implement
+          title: Implement the change
+          kind: agent
+          agent: auto
+          permission: worktree-write
+          skills: [conventions]
+          commands:
+            - [go, test, ./...]
+            - [go, vet, ./...]
+            - [gofmt, -w, .]
+          dependsOn: [profile]
+        - id: security-review
+          title: Review against the safety model
+          kind: agent
+          agent: security-reviewer
+          permission: read-only
+          skills: [conventions]
+          dependsOn: [implement]
+        - id: verify
+          kind: evaluation
+          commands:
+            - [task, deps]
+            - [task, ci]
+          dependsOn: [security-review]
+        - id: approval
+          kind: approval
+          dependsOn: [verify]
+
+  - name: schema-change
+    description: Storage schema changes go to the migration writer, then a read-only review.
+    when:
+      kind: [implementation, bugfix]
+      keywords: [migration, sqlite, database schema]
+    then:
+      stages:
+        - id: profile
+          kind: script
+        - id: migrate
+          title: Write the migration and storage methods
+          kind: agent
+          agent: migration-writer
+          permission: worktree-write
+          allowedPaths: [internal/storage/, internal/domain/, docs/]
+          skills: [conventions]
+          commands:
+            - [go, test, ./internal/storage/...]
+            - [go, vet, ./...]
+            - [gofmt, -w, .]
+          dependsOn: [profile]
+        - id: review
+          title: Review the schema change
+          kind: agent
+          agent: reviewer
+          permission: read-only
+          skills: [conventions, sqlite-migrations]
+          dependsOn: [migrate]
+        - id: verify
+          kind: evaluation
+          commands:
+            - [task, deps]
+            - [task, ci]
+          dependsOn: [review]
+        - id: approval
+          kind: approval
+          dependsOn: [verify]
+
+  - name: bugfix
+    description: Reproduce before fixing, then verify and review.
+    when:
+      kind: [bugfix]
+    then:
+      stages:
+        - id: profile
+          kind: script
+        - id: reproduce
+          title: Reproduce and locate the defect
+          kind: agent
+          agent: researcher
+          permission: read-only
+          skills: [conventions]
+          dependsOn: [profile]
+        - id: fix
+          title: Implement the fix
+          kind: agent
+          agent: auto
+          permission: worktree-write
+          skills: [conventions]
+          commands:
+            - [go, test, ./...]
+            - [go, vet, ./...]
+            - [gofmt, -w, .]
+          dependsOn: [reproduce]
+        - id: verify
+          kind: evaluation
+          commands:
+            - [task, deps]
+            - [task, ci]
+          dependsOn: [fix]
+        - id: approval
+          kind: approval
+          dependsOn: [verify]
+
+  - name: read-only
+    description: Research and review never write to the repository.
+    when:
+      kind: [research, review]
+    then:
+      stages:
+        - id: profile
+          kind: script
+        - id: worker
+          title: Investigate
+          kind: agent
+          agent: auto
+          permission: read-only
+          skills: [conventions]
+          dependsOn: [profile]
+        - id: approval
+          kind: approval
+          dependsOn: [worker]
+
+  - name: docs
+    description: Documentation changes follow the design-doc contract and its self-test.
+    when:
+      kind: [documentation]
+    then:
+      stages:
+        - id: profile
+          kind: script
+        - id: write
+          title: Update the documentation
+          kind: agent
+          agent: documenter
+          permission: worktree-write
+          allowedPaths: [docs/, README.md]
+          skills: [conventions, design-docs]
+          commands:
+            - [go, test, ./internal/docs/...]
+          dependsOn: [profile]
+        - id: verify
+          kind: evaluation
+          commands:
+            - [go, test, ./internal/docs/...]
+          dependsOn: [write]
+        - id: approval
+          kind: approval
+          dependsOn: [verify]
+
+default:
+  stages:
+    - id: profile
+      kind: script
+    - id: worker
+      title: Complete task
+      kind: agent
+      agent: auto
+      skills: [conventions]
+      commands:
+        - [go, test, ./...]
+        - [go, vet, ./...]
+        - [gofmt, -w, .]
+      dependsOn: [profile]
+    - id: verify
+      kind: evaluation
+      commands:
+        - [task, deps]
+        - [task, ci]
+      dependsOn: [worker]
+    - id: approval
+      kind: approval
+      dependsOn: [verify]

@@ -1,0 +1,8 @@
+# How Inkuna's Changes view and `inkunactl diff` show this repository's
+# changes (docs/inkuna-directory.md).
+version: 1
+# Paths collapsed by default, on top of the built-in lockfiles, ui/dist,
+# and frontend/wailsjs. gitignore syntax; a leading ! shows a path again.
+generated:
+  # Written by Stylesheet in internal/diff.
+  - frontend/src/diff.css

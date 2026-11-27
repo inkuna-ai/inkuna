@@ -1,0 +1,28 @@
+version: 2
+rules:
+  - name: security-sensitive
+    description: Changes to authentication, authorization, secrets, permissions, tokens, or cryptography get a security review, then pause for a person.
+    when:
+      kind: [implementation, bugfix]
+      # Keywords are matched as text anywhere in the objective and acceptance
+      # criteria, so each is long enough not to match unrelated words: "auth"
+      # alone would match "author".
+      keywords: [authentication, authenticate, authorization, authorize, oauth, login, password, credential, secret, token, permission, crypto, encrypt, decrypt]
+    then:
+      stages:
+        - use: profile
+        - id: change
+          kind: agent
+          title: Make the change
+          agent: auto
+          permission: worktree-write
+          dependsOn: [profile]
+        - use: verify
+          dependsOn: [change]
+        # Steps see only the handoffs of the stages they depend on, so the
+        # review names the change as well as its verification.
+        - use: security-review
+          dependsOn: [change, verify]
+        - use: approval
+          dependsOn: [security-review]
+          review: true

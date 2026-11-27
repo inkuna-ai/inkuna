@@ -1,0 +1,125 @@
+version: '3'
+
+vars:
+  BIN_DIR: '{{.ROOT_DIR}}/bin'
+  # Every build says which source it came from (internal/version). The
+  # version is the short commit until the repository has tags, and ends in
+  # -dirty when the checkout has uncommitted changes. Outside a git checkout
+  # both stay empty and the build reports dev.
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || true
+  COMMIT:
+    sh: git rev-parse HEAD 2>/dev/null || true
+  LDFLAGS: -X github.com/inkuna-ai/inkuna/internal/version.version={{.VERSION}} -X github.com/inkuna-ai/inkuna/internal/version.commit={{.COMMIT}}
+
+tasks:
+  bootstrap:
+    desc: Install pinned project dependencies and development tools
+    cmds:
+      - go mod download
+      - npm ci --prefix frontend
+      - go install tool
+      # The tools need a newer Go than Inkuna (tools/go.mod), which go
+      # fetches for this build alone, even where GOTOOLCHAIN=local is set,
+      # as actions/setup-go does.
+      - GOTOOLCHAIN=auto GOBIN={{.BIN_DIR}} go -C tools install tool
+
+  deps:
+    desc: Download project dependencies
+    cmds:
+      - go mod download
+      - npm ci --prefix frontend
+
+  doctor:
+    desc: Check local dependencies and runtime authentication
+    cmds:
+      - go run ./cmd/inkunactl doctor
+
+  dev:
+    desc: Start the Wails development server
+    cmds:
+      - go tool wails dev
+
+  notices:
+    desc: Rewrite THIRD_PARTY_NOTICES from the Go modules and npm packages the app ships
+    cmds:
+      - go test ./internal/notices -run TestTheNoticesAreCurrent -count=1 -update
+
+  diff:
+    desc: Write a run's changes as an HTML page (task diff RUN=<id> -- --open)
+    requires:
+      vars: [RUN]
+    cmds:
+      - go run ./cmd/inkunactl diff {{.CLI_ARGS}} {{.RUN}}
+
+  fmt:
+    desc: Format Go and frontend sources
+    cmds:
+      - gofmt -w .
+      - npm run format --prefix frontend
+
+  lint:
+    desc: Run static analysis and frontend lint/type checks
+    cmds:
+      - go vet ./...
+      # The tools need a newer Go than Inkuna (tools/go.mod), which go
+      # fetches for this build alone, even where GOTOOLCHAIN=local is set,
+      # as actions/setup-go does.
+      - GOTOOLCHAIN=auto GOBIN={{.BIN_DIR}} go -C tools install tool
+      - '{{.BIN_DIR}}/golangci-lint{{exeExt}} run ./...'
+      - npm run lint --prefix frontend
+      - npm run typecheck --prefix frontend
+
+  test:
+    desc: Run backend and frontend tests
+    cmds:
+      - npm test --prefix frontend -- --run
+      - go test ./...
+
+  build:go:
+    internal: true
+    cmds:
+      # Quoted, since inkunactl install builds in a checkout under the data
+      # directory, which on macOS is under Application Support.
+      - mkdir -p '{{.BIN_DIR}}'
+      - go build -ldflags '{{.LDFLAGS}}' -o '{{.BIN_DIR}}/inkunactl{{exeExt}}' ./cmd/inkunactl
+
+  build:example:
+    internal: true
+    cmds:
+      # examples/embed is a module of its own, which ./... here skips. It
+      # builds a binary from pkg/ alone, as a module outside this one must.
+      - go -C examples/embed vet ./...
+      - go -C examples/embed build -o '{{.BIN_DIR}}/embed-example{{exeExt}}' .
+
+  build:frontend:
+    internal: true
+    cmds:
+      - npm run build --prefix frontend
+
+  build:
+    desc: Build the CLI and frontend without native packaging
+    cmds:
+      - task: build:frontend
+      - task: build:go
+
+  package:
+    desc: Package the native desktop application
+    cmds:
+      # Current Linux distributions ship WebKitGTK 4.1, not the 4.0 Wails
+      # builds against by default.
+      - cmd: go tool wails build -tags webkit2_41 -ldflags '{{.LDFLAGS}}'
+        platforms: [linux]
+      - cmd: go tool wails build -ldflags '{{.LDFLAGS}}'
+        platforms: [darwin, windows]
+
+  ci:
+    desc: Run all continuous integration checks
+    cmds:
+      # ui/dist is not committed: build it first so the Go tests check the
+      # page the app will ship.
+      - task: build:frontend
+      - task: lint
+      - task: test
+      - task: build:go
+      - task: build:example

@@ -1,0 +1,20 @@
+version: 2
+rules:
+  - name: refactor
+    description: Restructuring without a change in behaviour goes to the refactorer, then verify, a review, and a pause for a person.
+    when:
+      kind: [implementation]
+      keywords: [refactor, restructure, reorganize, reorganise, without changing behaviour, without changing behavior]
+    then:
+      stages:
+        - use: profile
+        - id: refactor
+          kind: agent
+          title: Restructure the code
+          agent: refactorer
+          permission: worktree-write
+          dependsOn: [profile]
+        - use: verify
+          dependsOn: [refactor]
+        - use: review-and-approve
+          dependsOn: [refactor, verify]

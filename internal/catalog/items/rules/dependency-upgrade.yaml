@@ -1,0 +1,20 @@
+version: 2
+rules:
+  - name: dependency-upgrade
+    description: Dependency upgrades go to the upgrader, which reads the changelogs and fixes what breaks, then verify, a review, and a pause for a person.
+    when:
+      kind: [implementation]
+      keywords: [upgrade dependencies, update dependencies, upgrade the dependency, dependency upgrade, dependency update, bump, dependabot, renovate]
+    then:
+      stages:
+        - use: profile
+        - id: upgrade
+          kind: agent
+          title: Upgrade the dependencies
+          agent: upgrader
+          permission: worktree-write
+          dependsOn: [profile]
+        - use: verify
+          dependsOn: [upgrade]
+        - use: review-and-approve
+          dependsOn: [upgrade, verify]

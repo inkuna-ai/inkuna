@@ -1,0 +1,20 @@
+version: 2
+rules:
+  - name: schema-change
+    description: Schema and data migrations go to the migration-writer, then verify, a review, and a pause for a person.
+    when:
+      kind: [implementation]
+      keywords: [migration, database schema, schema change, database column, database table, alter table]
+    then:
+      stages:
+        - use: profile
+        - id: migrate
+          kind: agent
+          title: Write the migration
+          agent: migration-writer
+          permission: worktree-write
+          dependsOn: [profile]
+        - use: verify
+          dependsOn: [migrate]
+        - use: review-and-approve
+          dependsOn: [migrate, verify]

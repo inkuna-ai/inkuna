@@ -1,0 +1,61 @@
+# Example inkuna.yaml. Inkuna reads $INKUNA_CONFIG if set, else
+# $INKUNA_DATA_DIR/inkuna.yaml, else <OS user config dir>/Inkuna/inkuna.yaml
+# (a locator there may point at another data directory). Environment
+# variables override any value here.
+# Secret VALUES never belong in this file: the secrets block only declares
+# names that Inkuna resolves from the OS keychain or the environment.
+version: 1
+
+orchestrator:
+  runtime: claude        # codex | claude | copilot
+  model: ""              # blank keeps policy routing for the planning turn
+  maxTurns: 6
+  disabled: false        # true = deterministic staffing only
+
+runtimes:
+  codex:
+    binary: codex
+  claude:
+    binary: claude
+    secrets: [ANTHROPIC_API_KEY]   # exported only to Claude worker processes
+  copilot:
+    binary: copilot
+
+concurrency:
+  maxTasks: 3            # workflows running at once
+  maxWorkers: 2          # steps running at once inside one workflow
+
+timeouts:
+  planning: 5m
+  worker: 30m
+  verifier: 15m
+  approval: 15m
+  health: 3s
+  auth: 5m
+  linear: 15s
+
+notifications:
+  desktop: true
+
+secrets:
+  - name: LINEAR_API_KEY
+    description: Linear personal API key
+  - name: ANTHROPIC_API_KEY
+    description: Optional API key for Claude workers when not using claude.ai login
+
+repositories:
+  - name: inkuna
+    path: /Users/you/src/inkuna
+    defaultRuntime: claude
+
+agents:
+  directories:
+    - ~/.config/Inkuna/agents
+
+linear:
+  endpoint: https://api.linear.app/graphql
+
+github:
+  host: github.com
+  protocol: https
+  binary: gh

@@ -1,0 +1,93 @@
+# Example .inkuna/rules.yaml. Copy into a repository as .inkuna/rules.yaml.
+# Rules are evaluated top to bottom; the first match wins. Every flow must end
+# with an approval stage so nothing lands without review.
+version: 1
+rules:
+  - name: security-hotfix
+    description: Security-labelled bugs are triaged read-only, confirmed by a human, then fixed.
+    when:
+      kind: [bugfix]
+      labels: [security, cve]
+    then:
+      stages:
+        - id: profile
+          kind: script
+        - id: triage
+          title: Triage the vulnerability
+          kind: agent
+          agent: security-reviewer
+          permission: read-only
+          dependsOn: [profile]
+        - id: confirm
+          kind: human-input
+          prompt: "Confirm the remediation proposed in the triage summary before code changes begin."
+          dependsOn: [triage]
+        - id: fix
+          title: Apply the fix
+          kind: agent
+          agent: auto
+          permission: worktree-write
+          allowedPaths: [internal/, cmd/]
+          dependsOn: [confirm]
+        - id: verify
+          kind: evaluation
+          dependsOn: [fix]
+        - id: approval
+          kind: approval
+          dependsOn: [verify]
+
+  - name: schema-change
+    description: Objectives that mention migrations go to the migration specialist.
+    when:
+      kind: [implementation]
+      keywords: [migration, schema, sqlite]
+    then:
+      stages:
+        - id: profile
+          kind: script
+        - id: migrate
+          kind: agent
+          agent: migration-writer
+          dependsOn: [profile]
+        - id: review
+          title: Review the schema change
+          kind: agent
+          agent: reviewer
+          permission: read-only
+          dependsOn: [migrate]
+        - id: verify
+          kind: evaluation
+          dependsOn: [review]
+        - id: approval
+          kind: approval
+          dependsOn: [verify]
+
+  - name: docs-only
+    description: Small documentation tasks skip verification.
+    when:
+      kind: [documentation]
+      complexity: { min: 1, max: 4 }
+    then:
+      stages:
+        - id: write
+          kind: agent
+          agent: documenter
+        - id: approval
+          kind: approval
+          dependsOn: [write]
+
+default:
+  stages:
+    - id: profile
+      kind: script
+    - id: worker
+      title: Complete task
+      kind: agent
+      agent: auto
+      dependsOn: [profile]
+    - id: verify
+      kind: evaluation
+      dependsOn: [worker]
+    - id: approval
+      kind: approval
+      dependsOn: [verify]

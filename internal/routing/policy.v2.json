@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "bands": {
+    "codex": [
+      { "minimum": 1, "maximum": 1, "model": "gpt-6-luna", "reasoningEffort": "medium" },
+      { "minimum": 2, "maximum": 2, "model": "gpt-6-luna", "reasoningEffort": "high" },
+      { "minimum": 3, "maximum": 3, "model": "gpt-6-luna", "reasoningEffort": "xhigh" },
+      { "minimum": 4, "maximum": 4, "model": "gpt-6.1-terra", "reasoningEffort": "low" },
+      { "minimum": 5, "maximum": 5, "model": "gpt-6.1-terra", "reasoningEffort": "medium" },
+      { "minimum": 6, "maximum": 6, "model": "gpt-6.1-terra", "reasoningEffort": "high" },
+      { "minimum": 7, "maximum": 7, "model": "gpt-6.1-terra", "reasoningEffort": "xhigh" },
+      { "minimum": 8, "maximum": 8, "model": "gpt-6.1-sol", "reasoningEffort": "medium" },
+      { "minimum": 9, "maximum": 9, "model": "gpt-6.1-sol", "reasoningEffort": "high" },
+      { "minimum": 10, "maximum": 10, "model": "gpt-6.1-sol", "reasoningEffort": "xhigh" }
+    ],
+    "claude": [
+      { "minimum": 1, "maximum": 1, "model": "haiku", "reasoningEffort": "medium" },
+      { "minimum": 2, "maximum": 2, "model": "haiku", "reasoningEffort": "high" },
+      { "minimum": 3, "maximum": 3, "model": "haiku", "reasoningEffort": "xhigh" },
+      { "minimum": 4, "maximum": 4, "model": "sonnet", "reasoningEffort": "low" },
+      { "minimum": 5, "maximum": 5, "model": "sonnet", "reasoningEffort": "medium" },
+      { "minimum": 6, "maximum": 6, "model": "sonnet", "reasoningEffort": "high" },
+      { "minimum": 7, "maximum": 7, "model": "sonnet", "reasoningEffort": "xhigh" },
+      { "minimum": 8, "maximum": 8, "model": "opus", "reasoningEffort": "medium" },
+      { "minimum": 9, "maximum": 9, "model": "opus", "reasoningEffort": "high" },
+      { "minimum": 10, "maximum": 10, "model": "opus", "reasoningEffort": "xhigh" }
+    ],
+    "copilot": [
+      { "minimum": 1, "maximum": 3, "model": "claude-haiku-4.5" },
+      { "minimum": 4, "maximum": 7, "model": "claude-sonnet-4.6" },
+      { "minimum": 8, "maximum": 10, "model": "gpt-5.3-codex" }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+version: 2
+rules:
+  - name: test-coverage
+    description: Work to add missing tests goes to the test-writer, then verify, a review, and a pause for a person.
+    when:
+      kind: [implementation]
+      # Most tasks ask for passing tests in their acceptance criteria, so the
+      # keywords name coverage rather than tests.
+      keywords: [test coverage, code coverage, coverage gap, untested, missing tests]
+    then:
+      stages:
+        - use: profile
+        - id: write-tests
+          kind: agent
+          title: Write the missing tests
+          agent: test-writer
+          permission: worktree-write
+          dependsOn: [profile]
+        - use: verify
+          dependsOn: [write-tests]
+        - use: review-and-approve
+          dependsOn: [write-tests, verify]

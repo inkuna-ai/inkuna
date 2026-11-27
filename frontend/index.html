@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Inkuna renders repository content (docs, Mermaid diagrams), so the
+      webview loads everything only from the app itself: a doc cannot make the
+      app contact another server, and markup that slipped past a sanitizer
+      cannot run a script, which could call every bound method. The page has
+      no inline script; Wails adds its runtime.js and ipc.js from the app.
+      main_test.go checks the shipped page, and vite.config.ts loosens
+      script-src and connect-src for the dev server alone.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1215" />
+    <title>Inkuna</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

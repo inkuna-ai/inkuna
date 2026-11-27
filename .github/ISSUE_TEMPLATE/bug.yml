@@ -1,0 +1,36 @@
+name: Bug report
+description: Something Inkuna does wrong.
+labels: ["type: bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A security problem goes privately, as [SECURITY.md](https://github.com/inkuna-ai/inkuna/blob/main/SECURITY.md) describes, never in a public issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what Inkuna did, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce it
+      description: The smallest steps that show it. A rule, agent, or `inkuna.yaml` snippet helps, with secrets left out.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: inkunactl doctor
+      description: The output of `inkunactl doctor`, which names the build and every dependency.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or the run's timeline
+      description: Anything the app or a run said. Check it for secrets and paths you do not want public.
+      render: text

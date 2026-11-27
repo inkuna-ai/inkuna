@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      A development page, never built: `npm run dev --prefix frontend`, then
+      open /mock.html. It renders the run detail's Changes tab from fixtures
+      (src/mock/), with stand-ins for the Go bindings, so the view can be
+      checked by eye without a run. ?moved adds a commit after the loaded
+      change, to show the branch-moved notice.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1215" />
+    <title>Inkuna · Changes mock</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/mock/changes.tsx"></script>
+  </body>
+</html>

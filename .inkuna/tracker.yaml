@@ -1,0 +1,20 @@
+# What Inkuna may write to this repository's GitHub issues
+# (docs/mcp-and-trackers.md). A machine's inkuna.yaml can lower it, never
+# raise it. Everything is off: Inkuna's runs on itself write nothing to its
+# issues yet.
+version: 1
+# The kinds agents may ask for: status, comment, edit, and create.
+writes: []
+updates:
+  # Move the story to In Progress when its run starts.
+  start: false
+  # Comment the run's result when it ends.
+  result: false
+  # Offer Mark done on an ended run.
+  done: false
+github:
+  # The GitHub Project whose Status field holds an issue's status.
+  project: { owner: inkuna-ai, number: 1 }
+  field: Status
+  inProgress: In progress
+  done: Done

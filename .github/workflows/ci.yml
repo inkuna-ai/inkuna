@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  # A change that touches only documentation cannot change what these jobs
+  # build or test, so it skips them; docs.yml runs the checks that read the
+  # docs. Markdown under .inkuna/ is not listed: agents and skills change how
+  # Inkuna plans. Keep both lists the same as the paths in docs.yml.
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "NOTICE"
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "NOTICE"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      # One platform's failure must not cancel the others' runs, which say
+      # whether it fails only there.
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # The Windows job takes about 20 minutes; a stalled run fails here
+    # rather than at GitHub's six-hour default.
+    timeout-minutes: 45
+    steps:
+      # The Windows runner's git converts line endings on checkout, which
+      # would make gofmt, prettier, and tests that read files see CRLF.
+      - name: Keep line endings as committed
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # The update check below pushes this commit to a local origin,
+          # which a shallow clone cannot do.
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.x"
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: go-task/setup-task@v2
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - run: task deps
+      - run: task ci
+      # The install wizard builds the app and inkunactl and puts them in place
+      # in a temporary home, so the runner's own home is left alone. Windows
+      # gets the user PATH change in the registry, which the runner discards.
+      - name: Install into a temporary home
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Git Bash on Windows needs D:/a style paths, which Go also reads.
+          temp="$(cygpath -m "$RUNNER_TEMP" 2>/dev/null || echo "$RUNNER_TEMP")"
+          root="$temp/install"
+          home="$root/home"
+          mkdir -p "$home" "$root/Applications"
+          # Keep the Go and npm caches setup-go and setup-node filled.
+          export GOPATH="$(go env GOPATH)" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
+          export npm_config_cache="$(npm config get cache)"
+          export HOME="$home" USERPROFILE="$home" LOCALAPPDATA="$home/AppData/Local" APPDATA="$home/AppData/Roaming"
+          export INKUNA_DATA_DIR="$root/data" INKUNA_APPLICATIONS_DIR="$root/Applications" SHELL=/bin/bash
+          go run ./cmd/inkunactl install --yes < /dev/null | tee "$root/first.log"
+
+          case "$RUNNER_OS" in
+            macOS)
+              app="$root/Applications/Inkuna.app/Contents/MacOS/Inkuna"
+              cli="$home/.local/bin/inkunactl"
+              grep -qF 'export PATH="$HOME/.local/bin:$PATH"' "$home/.bash_profile" ;;
+            Linux)
+              app="$home/.local/bin/inkuna"
+              cli="$home/.local/bin/inkunactl"
+              grep -qF 'export PATH="$HOME/.local/bin:$PATH"' "$home/.bashrc"
+              grep -q '^Exec=' "$home/.local/share/applications/inkuna.desktop"
+              test -s "$home/.local/share/icons/inkuna.png" ;;
+            Windows)
+              app="$LOCALAPPDATA/Programs/Inkuna/Inkuna.exe"
+              cli="$LOCALAPPDATA/Programs/Inkuna/inkunactl.exe" ;;
+          esac
+          test -x "$app"
+          test -f "$INKUNA_DATA_DIR/install.json"
+          "$cli" version --json | tee "$root/version.json"
+          grep -qF "\"commit\": \"$(git rev-parse HEAD)\"" "$root/version.json"
+
+          # The build must leave the checkout clean, or every later install
+          # would rebuild it.
+          git status --short
+          git diff --stat
+          # A second run finds everything done: it builds nothing and asks
+          # nothing, so it succeeds without --yes.
+          go run ./cmd/inkunactl install < /dev/null | tee "$root/second.log"
+          grep -q 'is already installed' "$root/second.log"
+
+          # inkunactl update, run by the installed inkunactl, which replaces
+          # itself. The checkout has no credentials for the private
+          # repository, so its origin becomes a local one whose main is one
+          # commit past the install.
+          installed="$(git rev-parse HEAD)"
+          next="$(GIT_AUTHOR_NAME=CI GIT_AUTHOR_EMAIL=ci@example.invalid GIT_COMMITTER_NAME=CI GIT_COMMITTER_EMAIL=ci@example.invalid \
+            git commit-tree "HEAD^{tree}" -p HEAD -m "Check inkunactl update in CI")"
+          git init --quiet --bare "$root/origin.git"
+          git push --quiet "$root/origin.git" "$next:refs/heads/main"
+          git remote set-url origin "$root/origin.git"
+          git switch --quiet -C main
+          if "$cli" update --check < /dev/null > "$root/check.log"; then
+            cat "$root/check.log"; echo "update --check found nothing to update"; exit 1
+          fi
+          cat "$root/check.log"
+          grep -qF '1 commit behind origin/main' "$root/check.log"
+          grep -qF -- '- Check inkunactl update in CI' "$root/check.log"
+          "$cli" update --yes < /dev/null | tee "$root/update.log"
+          "$cli" version --json | grep -qF "\"commit\": \"$next\""
+          test -e "$cli.previous"
+          "$cli" update --check < /dev/null | tee "$root/current.log"
+          grep -q 'is up to date with origin/main' "$root/current.log"
+          "$cli" update --rollback --yes < /dev/null | tee "$root/rollback.log"
+          "$cli" version --json | grep -qF "\"commit\": \"$installed\""
+      - name: Check the Start menu shortcut and the user PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $programs = Join-Path $env:RUNNER_TEMP 'install\home\AppData\Local\Programs\Inkuna'
+          $link = Join-Path $env:RUNNER_TEMP 'install\home\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Inkuna.lnk'
+          $target = (New-Object -ComObject WScript.Shell).CreateShortcut($link).TargetPath
+          if ($target -ne (Join-Path $programs 'Inkuna.exe')) { throw "the shortcut opens '$target'" }
+          $path = (Get-ItemProperty -Path HKCU:\Environment -Name Path).Path
+          if (-not (($path -split ';') -contains $programs)) { throw "the user PATH lacks $programs" }

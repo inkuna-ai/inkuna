@@ -1,0 +1,28 @@
+# How branches and worktrees are made for Inkuna itself (docs/branching.md).
+# Inkuna's runs and `inkunactl branch new` both follow it.
+version: 1
+# Where stories come from: linear, jira, github, or none.
+tracker: github
+branch:
+  # New work starts from origin/<base> (or <base> when origin has none).
+  base: main
+  # {type}, {story}, and {slug}; without a story id, {story} and its separator drop out.
+  pattern: "{type}/{story}-{slug}"
+  types: [feature, bug, chore, refactor, hotfix, enabler]
+  kindTypes:
+    documentation: enabler
+    skill-authoring: chore
+  maxLength: 50
+worktrees:
+  # false: writable steps work in the checkout, on the branch it has checked out.
+  enabled: true
+  # Relative to the repository; {repo} is its directory name; empty is Inkuna's data directory.
+  location: ../{repo}-worktrees
+  # listener: remove when the run finishes; prune: remove finished runs' worktrees
+  # when a new run starts; merged: once the branch's pull request merged; manual:
+  # only from the run view. Branches are always kept.
+  cleanup: prune
+out:
+  # What a completed run does with .inkuna/out: archive (keep what is left as one
+  # artifact of the run, then empty it), remove, or keep.
+  cleanup: archive

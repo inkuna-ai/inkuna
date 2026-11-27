@@ -1,0 +1,17 @@
+/bin/
+/build/bin/
+/frontend/dist/
+/frontend/node_modules/
+/frontend/package.json.md5
+*.db
+*.db-shm
+*.db-wal
+*.tsbuildinfo
+.DS_Store
+.inkuna/out/
+.env
+.env.*
+!.env.example
+
+# The built frontend; task build, task ci, and task package produce it.
+/ui/dist/

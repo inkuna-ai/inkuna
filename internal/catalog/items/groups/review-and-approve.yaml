@@ -1,0 +1,15 @@
+# Reviews the change with the reviewer, then pauses for a person to approve it or send changes back.
+version: 2
+groups:
+  review-and-approve:
+    stages:
+      - id: review
+        kind: agent
+        title: Review the change
+        agent: reviewer
+        permission: read-only
+      # With no feedback target, changes go back to the nearest writable
+      # stage before the group, whichever flow uses it.
+      - use: approval
+        dependsOn: [review]
+        review: true
