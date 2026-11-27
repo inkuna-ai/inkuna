@@ -1,6 +1,6 @@
 ---
 title: MCP servers and tracker write-back
-lastUpdated: 2026-11-25
+lastUpdated: 2026-11-27
 author: Brandon Manning
 tags: [mcp, trackers, runtime, engine, design]
 status: current
@@ -10,15 +10,15 @@ status: current
 
 Workers can be given MCP servers, and Inkuna can write back to the issue a run came from. A project declares the MCP servers its machine offers, and a rule stage or an agent names the ones its steps get; Inkuna starts exactly those, on Claude Code, Codex, and Copilot alike. A repository says what its runs may change in its issue tracker (Linear or GitHub issues), Inkuna moves the story along as the run progresses, and an agent that wants a change in the tracker describes it in its handoff for Inkuna to make once a person approves the run. No tracker credential ever reaches a worker.
 
-Status: **design**, reviewed in #150, and built. #151, declared MCP servers, is built ([architecture.md](architecture.md#mcp-servers-a-step-is-granted) describes it as it runs), and so are #152, a runtime's opt-in to the user's own servers ([The user's own servers](#the-users-own-servers-152)), #153, the tracker writes and `tracker.yaml` ([Trackers](#trackers-153)), #154, Inkuna's own story updates ([Inkuna's own updates](#inkunas-own-updates-154)), and #155, the changes an agent asks for ([Changes an agent asks for](#changes-an-agent-asks-for-155)). The epic is #149. Each section names the issue that builds it: #151 declared MCP servers, #152 a runtime's opt-in to the user's own servers, #153 the tracker writes and `tracker.yaml`, #154 Inkuna's own story updates, and #155 the changes an agent asks for. [Decisions](#decisions) records the answers given on 2026-10-28.
+Everything this doc describes is built, except where it says otherwise. [architecture.md](architecture.md#mcp-servers-a-step-is-granted) describes how a worker is given its MCP servers as it runs, [Checked against the CLIs](#checked-against-the-clis) records what each CLI was found to do, and [Decisions](#decisions) records the choices the design rests on.
 
-## Today
+## Summary
 
-- **MCP.** Since #151, a worker starts the MCP servers its step is granted from those `inkuna.yaml` declares, and no others; a step granted none starts none, as before. Since #152, a worker starts the user's own servers only when its runtime's `userMcp` names them; `userConfig` alone starts none ([The user's own servers](#the-users-own-servers-152)).
-- **Linear** is an intake source, and since #153 a write target: `internal/linear` reads an issue (`Client.Issue`) and the key's user (`Client.Viewer`), and its `Tracker` adapter makes the writes [Kinds](#kinds) lists. `LINEAR_API_KEY` is declared as "Linear personal API key" ([configuration.md](configuration.md)).
-- **GitHub issues** are an intake source, and since #153 a write target through `internal/github.Tracker`. `CreateApprovedBatch` can create issues from approved drafts, but nothing calls it. #155 removed the handoff's `discoveredTasks`, which nothing read; `create` replaces it.
-- **Runs write Inkuna's own updates, and what agents ask for.** #153 built the writes, the ceiling, and the guard every write goes through. Since #154 a run moves its story to In Progress, comments its result, and marks it Done on request, as `tracker.yaml` allows, and since #155 an agent asks for changes in its handoff, which Inkuna makes once a person approves the run.
-- An agent can already list `LINEAR_API_KEY` under `secrets`, which puts the raw key in its worker's environment ([agents.md](agents.md#file-format)). This design gives tracker writes a path that never does, and leaves `secrets` as it is for other uses.
+- **MCP.** A worker starts the MCP servers its step is granted from those `inkuna.yaml` declares, and no others; a step granted none starts none. It starts the user's own servers only when its runtime's `userMcp` names them; `userConfig` alone starts none ([The user's own servers](#the-users-own-servers)).
+- **Linear** is an intake source and a write target: `internal/linear` reads an issue (`Client.Issue`) and the key's user (`Client.Viewer`), and its `Tracker` adapter makes the writes [Kinds](#kinds) lists. `LINEAR_API_KEY` is declared as "Linear personal API key" ([configuration.md](configuration.md)).
+- **GitHub issues** are an intake source and a write target through `internal/github.Tracker`. `CreateApprovedBatch` can create issues from approved drafts, but nothing calls it; an agent asks for a new issue with a `create` change instead ([Changes an agent asks for](#changes-an-agent-asks-for)).
+- **Runs write Inkuna's own updates, and what agents ask for.** Every write goes through one guard and stays within the repository's ceiling ([Trackers](#trackers)). A run moves its story to In Progress, comments its result, and marks it Done on request, as `tracker.yaml` allows, and an agent asks for changes in its handoff, which Inkuna makes once a person approves the run.
+- An agent can list `LINEAR_API_KEY` under `secrets`, which puts the raw key in its worker's environment ([agents.md](agents.md#file-format)). Tracker writes take a path that never does; `secrets` stays for other uses.
 
 ## Terms
 
@@ -26,7 +26,7 @@ Status: **design**, reviewed in #150, and built. #151, declared MCP servers, is 
 | --- | --- |
 | Declared server | An MCP server listed under `mcpServers` in `inkuna.yaml`. Machine-local, because it names commands and secrets. |
 | Grant | The declared servers a step gets: those its agent names plus those its stage names. |
-| Tracker | Where a repository's stories live: the `tracker` in `.inkuna/branching.yaml`. Linear and GitHub issues can be written to; `jira` and `none` cannot yet. |
+| Tracker | Where a repository's stories live: the `tracker` in `.inkuna/branching.yaml`. Linear and GitHub issues can be written to; `jira` and `none` have no adapter, so they cannot. |
 | Story | The issue a run is for, found by `branching.StoryFor`: the imported issue, then a task label, then a key leading the title or objective. |
 | Kind | A sort of tracker change: `status`, `comment`, `edit`, or `create`. |
 | Tracker change | One change an agent asks for in its handoff, held until a person approves the run. |
@@ -65,7 +65,7 @@ flowchart LR
     Adapter -- "gh" --> GitHub[(GitHub issues and Projects)]
 ```
 
-## MCP servers (#151)
+## MCP servers
 
 ### Declaring a server
 
@@ -101,13 +101,13 @@ secrets:
 | `env` | no | For a `command`: environment variable name to declared secret name, never a variable every CLI is started with. |
 | `bearer` | no | For a `url`: a declared secret sent as the bearer token. |
 | `tools` | no | The tool names the worker may call. Empty means every tool the server offers. Required when `tracker` is set. |
-| `tracker` | no | `linear` or `github`: this server reaches that tracker. Its `tools` must be set and must name only tools that read, because every change to a tracker goes through `trackerChanges` and the review gate ([Changes an agent asks for](#changes-an-agent-asks-for-155)). Go refuses a tracker's server without a `tools` list; which tools only read is the declaring person's call, and the approval screen shows the list. |
+| `tracker` | no | `linear` or `github`: this server reaches that tracker. Its `tools` must be set and must name only tools that read, because every change to a tracker goes through `trackerChanges` and the review gate ([Changes an agent asks for](#changes-an-agent-asks-for)). Go refuses a tracker's server without a `tools` list; which tools only read is the declaring person's call, and the approval screen shows the list. |
 
 Decoding is strict, as for the rest of `inkuna.yaml`. A secret a server names must be declared under `secrets`, and its value comes from the keychain or the environment as any secret's does.
 
 ### Granting a server
 
-An agent definition and a rule stage each gain an optional `mcp` list:
+An agent definition and a rule stage each take an optional `mcp` list:
 
 ```markdown
 ---
@@ -135,9 +135,9 @@ Inkuna writes the granted servers into a configuration file in the run's data di
 
 | Runtime | Servers | Tools |
 | --- | --- | --- |
-| Claude Code | `--strict-mcp-config --mcp-config <file>`, so the user's own servers stay off. With no grant, the empty config it has today. | `--allowedTools` gains `mcp__<server>` for a server with no `tools`, or `mcp__<server>__<tool>` for each listed tool. The model still sees a server's other tools, but a call to one is denied and never offered as a grant. |
+| Claude Code | `--strict-mcp-config --mcp-config <file>`, so the user's own servers stay off. With no grant, an empty config (`{"mcpServers":{}}`). | `--allowedTools` gains `mcp__<server>` for a server with no `tools`, or `mcp__<server>__<tool>` for each listed tool. The model still sees a server's other tools, but a call to one is denied and never offered as a grant. |
 | Codex | `-c mcp_servers.<name>.command`, `.args`, `.url`, `.enabled_tools`, `.default_tools_approval_mode="approve"` (exec cannot ask, and refuses an MCP call otherwise), and `.required=true` overrides. `--ignore-user-config` stays, so `config.toml`'s servers stay off. | `enabled_tools` from `tools`, which hides the rest. |
-| Copilot | `--additional-mcp-config @<file>`. The user's servers are still each disabled with `--disable-mcp-server`, as today, except one with a granted server's name, which the call's file replaces. | `--available-tools` gains `<server>-<tool>` per tool, or the server's name for all; a tool left off does not exist for the call. `--allow-tool=<server>(<tool>)` is passed too. |
+| Copilot | `--additional-mcp-config @<file>`. The user's servers are each disabled with `--disable-mcp-server`, except one with a granted server's name, which the call's file replaces. | `--available-tools` gains `<server>-<tool>` per tool, or the server's name for all; a tool left off does not exist for the call. `--allow-tool=<server>(<tool>)` is passed too. |
 
 A worker's prompt lists its servers with their descriptions under the tools it has, so a model knows what it was given and why.
 
@@ -148,13 +148,13 @@ A server's secret values are in its configuration file or in the server's own en
 - **Claude Code and Copilot** read the values from the configuration file, which sits outside every worktree, is readable only by the user, lives only for the call, and is never named to the model. A bare `Read` rule lets Claude Code read any absolute path, so the call also denies Read, Grep, and Glob the file's directory; Copilot's sandbox already refuses its `view` tool there. A Claude Code call given a server with secrets, or the user's own servers, also runs its shell commands in Claude Code's sandbox, and does not start without it, nor when a project settings file would widen its grant ([architecture.md](architecture.md#mcp-servers-a-step-is-granted)).
 - **Codex** gets the value in its own process environment, under the server's variable name or `INKUNA_MCP_<SERVER>_BEARER` for a bearer token, `mcp_servers.<name>.env_vars` or `bearer_token_env_var` passes it to the server, and `shell_environment_policy.exclude` keeps it out of the model's shell, which otherwise sees it.
 
-#151 proved each mechanism with a stub server and a scripted stub model, as #39 and #42 proved the preamble flags, and Inkuna refuses to give servers to a template, which cannot keep a secret from its shell. The runtime replaces a server's secret values in every event Inkuna keeps, so a server that echoes its token leaves it in no log.
+Each mechanism was checked on every CLI with a stub server and a scripted stub model ([Checked against the CLIs](#checked-against-the-clis)), and `internal/runtime/mcp_cli_test.go` checks Inkuna's side with fake CLIs. Inkuna refuses to give servers to an argument template (`prepareMCP`), which cannot keep a secret from its shell. The runtime replaces a server's secret values in every event Inkuna keeps, so a server that echoes its token leaves it in no log.
 
 ### What the run records
 
-The step's context envelope gains `mcpServers` (name, description, command or URL, the tools allowed, and the tracker it reaches, never its secrets), so the Context tab shows what each step had, and the approval screen lists it per step. A runtime's capabilities still say whether it starts no server beyond what a step is granted.
+The step's context envelope carries `mcpServers` (name, description, command or URL, the tools allowed, and the tracker it reaches, never its secrets), so the Context tab shows what each step had, and the approval screen lists it per step. A runtime's capabilities still say whether it starts no server beyond what a step is granted.
 
-## The user's own servers (#152)
+## The user's own servers
 
 `runtimes.<name>.userMcp` names servers from the user's own setup in that CLI, as the CLI lists them, that every step on the runtime is given with all their tools. It is separate from `userConfig`, which brings back hooks, memory, and the rest, and it is now the only way a worker starts one of the user's servers: with `userConfig` and no `userMcp`, Codex and Copilot are told to switch off every server of the user's they would start. The Runtimes view lists a runtime's servers on request (`ListUserMCPServers`) with what the CLI says of each, for the user to tick, and signs in to one that needs it (`SignInUserMCPServer`).
 
@@ -162,11 +162,11 @@ The step's context envelope gains `mcpServers` (name, description, command or UR
 | --- | --- |
 | Claude Code | No `--strict-mcp-config`; the user's servers load from their own configuration, `allowedMcpServers` in the call's settings starts only the ticked ones and the granted, and each joins `--allowedTools`. The shell runs in Claude Code's sandbox. |
 | Codex | Each ticked server's entry from `codex mcp get --json` is passed as `-c mcp_servers.*` overrides, with `--ignore-user-config` kept, so nothing else from `config.toml` returns; its secrets go in Codex's environment, kept from the shell. With `userConfig`, the server comes from `config.toml` and every other one there is switched off. |
-| Copilot | The ticked servers are no longer disabled, and each is allowed with `--available-tools` and `--allow-tool=<server>`. |
+| Copilot | The ticked servers are not disabled, and each is allowed with `--available-tools` and `--allow-tool=<server>`. |
 
 The approval screen and the Context tab name the servers that came from the user's setup, and warn that nothing reviews what a step changes through them. A plan records each runtime's `userMcp`, and approval refuses one whose runtimes name other servers by then. Before a step starts, a server that needs signing in pauses it with an inbox request to sign in, which runs the CLI's own sign-in, or skip; any other server that cannot start is left out with a note. Planning calls and peers get none. The full mechanism is in [architecture.md](architecture.md#the-users-own-mcp-servers).
 
-## Trackers (#153)
+## Trackers
 
 ### The interface
 
@@ -186,9 +186,9 @@ type Tracker interface {
 }
 ```
 
-An id is the tracker's own: `ENG-12` for Linear (its URL and Linear's UUID work too), `12` or `#12` for a GitHub issue, or the issue's URL, which must be one of the repository's own: another repository's number would name a different issue. `TrackerIssue` carries the status, whether the issue is done, and for Linear its team, its cycle and whether that is the team's active one, and its attached links, which #154 reads. A write the tracker cannot make as asked, such as a field it does not have or an issue that does not exist, is a `domain.TrackerRefusal` with the reason, which no retry would change; anything else is the tracker's own error. Two methods only read, for checking a change an agent asks for (#155): `Statuses` lists the statuses an issue can be moved to, a Linear team's states but its canceled ones, or the options of the GitHub Project's status field, and refuses when the issue's status cannot be set at all; `CheckEdit` refuses, without asking the tracker, an edit with a field the tracker does not have or a value it never takes, the same refusals `Edit` makes before it writes. Linear sends its errors with the HTTP status of the first one (403 for a missing scope, 400 for an entity it cannot find), and the client reads them whatever the status.
+An id is in the tracker's own format, for example `ENG-12` for Linear (its URL and Linear's UUID work too), and `12` or `#12` for a GitHub issue, or the issue's URL, which must be one of the repository's own: another repository's number would name a different issue. `TrackerIssue` carries the status, whether the issue is done, and for Linear its team, its cycle and whether that is the team's active one, and its attached links, which [Inkuna's own updates](#inkunas-own-updates) read. A write the tracker cannot make as asked, such as a field it does not have or an issue that does not exist, is a `domain.TrackerRefusal` with the reason, which no retry would change; anything else is the tracker's own error. Two methods only read, for checking a change an agent asks for ([Go's checks](#the-grant-and-gos-checks)): `Statuses` lists the statuses an issue can be moved to, a Linear team's states but its canceled ones, or the options of the GitHub Project's status field, and refuses when the issue's status cannot be set at all; `CheckEdit` refuses, without asking the tracker, an edit with a field the tracker does not have or a value it never takes, the same refusals `Edit` makes before it writes. Linear sends its errors with the HTTP status of the first one (403 for a missing scope, 400 for an entity it cannot find), and the client reads them whatever the status.
 
-The repository's tracker is the `tracker` in `.inkuna/branching.yaml`. `jira` and `none` have no adapter, so a repository with either gets no writes, and Settings says so. The Linear adapter uses `LINEAR_API_KEY`, found as today (a session key from Connections, then the environment, then the keychain). The GitHub adapter runs `gh` for the repository's `origin`, as the rest of Inkuna's GitHub work does.
+The repository's tracker is the `tracker` in `.inkuna/branching.yaml`. `jira` and `none` have no adapter, so a repository with either gets no writes, and Settings says so. The Linear adapter uses `LINEAR_API_KEY`, found as for intake (a session key from Connections, then the environment, then the keychain). The GitHub adapter runs `gh` for the repository's `origin`, as the rest of Inkuna's GitHub work does.
 
 ### The guard
 
@@ -209,7 +209,7 @@ The guard refuses, before the adapter sees it, a purpose the effective settings 
 
 Start and Finish go through the adapter's `Advance(id, stage, status)`, which Inkuna's own updates alone use: it moves the issue to the status named, or, when a Linear team has no state of that name, to the team's first `started` or `completed` state by its place in the workflow, and says which it chose. It leaves alone an issue already in that status and one already done (a completed Linear state, or a GitHub issue closed as completed), whichever stage is asked for, so it never moves a finished story back. Done on GitHub also closes an open issue as completed, and never reopens one closed as not planned.
 
-The guard hands every write it is asked for, applied, unchanged, refused, or failed, to a recorder as a `domain.TrackerWrite`: the tracker, the write, its kind or update, the issue, what it changed (`status → In Progress`, `comment: …`, `edit: labels +backend; estimate → 2`), the outcome, the reason, and the URL it made. Unchanged is a write that was not needed, such as a story In Progress already or a link attached already; its reason says how the issue already was. A guard cannot be made without one. `Service.storyTracker` opens the guarded tracker for a run and records each write on the run's timeline under one of its step runs, with the write in the event's payload, as a warning when it was not made. It reads the settings from the project's checkout, never a run's worktree, so a step cannot raise its own run's ceiling. With worktrees off a step writes in that checkout, so a run's own updates use the settings it was approved under instead ([Inkuna's own updates](#inkunas-own-updates-154)).
+The guard hands every write it is asked for, applied, unchanged, refused, or failed, to a recorder as a `domain.TrackerWrite`: the tracker, the write, its kind or update, the issue, what it changed (`status → In Progress`, `comment: …`, `edit: labels +backend; estimate → 2`), the outcome, the reason, and the URL it made. Unchanged is a write that was not needed, such as a story In Progress already or a link attached already; its reason says how the issue already was. A guard cannot be made without one. `Service.storyTracker` opens the guarded tracker for a run and records each write on the run's timeline under one of its step runs, with the write in the event's payload, as a warning when it was not made. It reads the settings from the project's checkout, never a run's worktree, so a step cannot raise its own run's ceiling. With worktrees off a step writes in that checkout, so a run's own updates use the settings it was approved under instead ([Inkuna's own updates](#inkunas-own-updates)).
 
 ### Kinds
 
@@ -222,7 +222,7 @@ The guard hands every write it is asked for, applied, unchanged, refused, or fai
 
 A comment or an issue made with a marker is looked up by its marker before a retry makes another. On GitHub the marker ends the body, and a retry finds it there, counting only what gh's own account wrote: in the issue's comments through the REST API, which finds a comment every time, or an issue among the repository's hundred newest through the REST API, which is current at once, and then through `gh issue list --search`, whose index lags. A GitHub issue is therefore not certain to be made only once: when more than a hundred newer issues are opened before search has indexed it, a retry misses it and makes another. Linear turns a body's markup into its own, so its adapter derives the comment's or issue's id from the marker instead (a UUID in version 4 form, which Linear accepts for a new entity), and a retry looks that id up.
 
-Attaching a URL is Inkuna's own (#154), never an agent's. Linear's adapter attaches a link only when the issue has none to the same page, which is how Linear's GitHub integration often attached the pull request already, and says whether it did. A GitHub issue has no attachments, so the GitHub adapter refuses it, and Mark done never asks; a pull request that closes the issue links to it already. Archiving, deleting, and closing as not planned are never offered.
+Attaching a URL is one of Inkuna's own updates, never an agent's. Linear's adapter attaches a link only when the issue has none to the same page, which is how Linear's GitHub integration often attached the pull request already, and says whether it did. A GitHub issue has no attachments, so the GitHub adapter refuses it, and Mark done never asks; a pull request that closes the issue links to it already. Archiving, deleting, and closing as not planned are never offered.
 
 ### `.inkuna/tracker.yaml`
 
@@ -273,12 +273,12 @@ The effective setting is the intersection (`tracker.Narrow`), and a path declare
 
 ### Connections
 
-Connections says, per tracker, whether Inkuna can write: can write, some, read only, or unknown, with the reason. A key that can only read keeps intake working, and every write it cannot make reports why. `LINEAR_API_KEY`'s description no longer calls it read-only.
+Connections says, per tracker, whether Inkuna can write: can write, some, read only, or unknown, with the reason. A key that can only read keeps intake working, and every write it cannot make reports why. `LINEAR_API_KEY`'s description, "Linear personal API key", does not call it read-only.
 
 - **GitHub.** `gh auth status --json hosts` lists the token's scopes. `repo` writes issues (`public_repo` only those of public repositories), and `project` sets a Project's field; when the token lacks it, Connections names the declared repositories whose `tracker.yaml` names a project and whose effective settings, after `inkuna.yaml`, allow a `status` write, `updates.start`, or `updates.done`. A fine-grained or app token lists no scopes, which shows as unknown.
 - **Linear.** Linear does not report a key's permissions, and a key can be limited to reading, to creating issues, or to commenting, and to some teams. Inkuna asks with three mutations that cannot change anything, since each names an issue or team that does not exist: `issueUpdate`, `commentCreate`, and `issueCreate` (`linear.Client.WriteAccess`). Each names a fresh random id, because Linear lets a client choose a new entity's id, so a fixed one could be made to exist. Inkuna reads a refusal for the key's scope (`Invalid scope: write required`) as no and an entity not found as yes, which assumes Linear checks a key's permissions before it looks the entity up. That assumption is unverified: it has not been confirmed against a live Linear endpoint for `issueUpdate`, `commentCreate`, or `issueCreate`, and the tests only check how Inkuna reads answers of that shape, not that Linear gives them. Any other answer shows as unknown, with the outcome of the last write this session tried. A key limited to some teams is only found out by a write to another team's issue, which says why. A definite answer is kept until the key changes; an unknown one is asked again.
 
-## Inkuna's own updates (#154)
+## Inkuna's own updates
 
 ```mermaid
 sequenceDiagram
@@ -306,15 +306,15 @@ sequenceDiagram
 - **Cycle.** With `linear.requireCurrentCycle`, planning reads the story before it spends anything, the title call included, and refuses one outside its team's active cycle, saying which cycle it is in, or that it is in none. When Linear cannot be asked, for want of a key or for a failed request, planning refuses too and says why: the repository asked for the check.
 - **Start.** With `updates.start`, the story moves to In Progress when the run's first step starts, recorded under that step's run. It is tried once per run, before that step's work, and kept as tried even when it fails; a later round never moves the story again.
 - **Result.** With `updates.result`, Inkuna comments each time the run ends, after any step of it started: completed, failed (with the first line of its error), or cancelled, and in how many rounds; its checks ("k of N passed"); its commits on the branch, up to five subjects; and the pull request `gh pr list --head <branch>` finds for the branch, the open one first, with its state. The comment carries a marker (`<!-- inkuna-run:<id> -->`), so a later round's end edits the same comment rather than adding another. It is written apart from the run, one at a time, so a slow tracker never holds up the run's end or the next round, and recorded under the last step run of the round. A run cut short because Inkuna stopped is not reported until a later round of it ends.
-- **Done, on request.** With `updates.done`, an ended run with a branch offers **Mark done** (`MarkStoryDone`). Inkuna lists the branch's pull requests; until one has merged it says which one is open or closed and changes nothing. Once one merged, Inkuna attaches it to a Linear story unless it is attached already, and moves the story to Done unless it is done already, which on GitHub also closes the issue as completed when the merge did not. Mark done looks the pull request up itself and never runs on its own: the Tasks view's pull request check ([branching.md](branching.md#pull-requests), #66) records each branch's pull request and, under `worktrees.cleanup: merged`, removes a merged run's worktree, but never moves a story. Nothing happens to the story until someone asks, and asking again changes nothing more.
+- **Done, on request.** With `updates.done`, an ended run with a branch offers **Mark done** (`MarkStoryDone`). Inkuna lists the branch's pull requests; until one has merged it says which one is open or closed and changes nothing. Once one merged, Inkuna attaches it to a Linear story unless it is attached already, and moves the story to Done unless it is done already, which on GitHub also closes the issue as completed when the merge did not. Mark done looks the pull request up itself and never runs on its own: the Tasks view's pull request check ([branching.md](branching.md#pull-requests)) records each branch's pull request and, under `worktrees.cleanup: merged`, removes a merged run's worktree, but never moves a story. Nothing happens to the story until someone asks, and asking again changes nothing more.
 
 Each update is idempotent: a story already In Progress or done is left alone, and a pull request already attached is not attached again. Linear's GitHub integration often does these already; Inkuna fills in only what is missing, and the timeline records what it left as unchanged. Each update is on the run's timeline, under one of its step runs. A Start or result that is not made is a warning there and a desktop notification (kind `tracker-failed`), since nobody asked for it at that moment; Mark done says what happened where it was asked, as well as on the timeline. None of them ever fails a run, and a finished run stays finished.
 
-## Changes an agent asks for (#155)
+## Changes an agent asks for
 
 ### The handoff field
 
-A step granted at least one kind has `trackerChanges` in its handoff schema, holding only the kinds it was granted and the fields they take (`handoffSchemaFor`); a step granted none does not, so its model cannot produce the field at all. `discoveredTasks`, which nothing read, is gone: `create` replaces it.
+A step granted at least one kind has `trackerChanges` in its handoff schema, holding only the kinds it was granted and the fields they take (`handoffSchemaFor`); a step granted none does not, so its model cannot produce the field at all.
 
 ```json
 {
@@ -327,7 +327,7 @@ A step granted at least one kind has `trackerChanges` in its handoff schema, hol
 }
 ```
 
-Every change has a `kind`, and every kind but `create` an `issue`: `story` for the run's own story, or an id in the tracker's format. The rest are optional fields of one flat object, which keeps the schema strict on every model (#107); Go checks which fields each kind may carry (`domain.TrackerChange.Problem`):
+Every change has a `kind`, and every kind but `create` an `issue`: `story` for the run's own story, or an id in the tracker's format. The rest are optional fields of one flat object, which keeps the schema strict on every model; Go checks which fields each kind may carry (`domain.TrackerChange.Problem`):
 
 | Kind | Fields |
 | --- | --- |
@@ -340,7 +340,7 @@ A model held to the strict schema sends every field, `null` or empty where it se
 
 ### The grant and Go's checks
 
-A step's kinds are the project's (`tracker.yaml`, narrowed by `inkuna.yaml`) intersected with what its agent or its stage asks for. Each gains an optional `tracker` list:
+A step's kinds are the project's (`tracker.yaml`, narrowed by `inkuna.yaml`) intersected with what its agent or its stage asks for. Each takes an optional `tracker` list:
 
 ```yaml
 - id: implement
@@ -353,7 +353,7 @@ Planning grants each agent step those kinds (`planner.grantTrackerKinds`), notes
 
 A step with kinds needs a pausing review gate (`review: true`) after it, directly or through other steps, where its changes can be seen. Without one, planning fails and says so (`planner.CheckTrackerGates`), as a check loop with nowhere to send its failures does, and approval checks it again.
 
-Approval keeps the tracker settings with the run (`executions.story_json`), as #154 does for a run's story, and does so for a run without a story whose steps may ask for changes, too. When a step starts, its kinds are narrowed to what those settings still allow, given the repository's and this machine's settings now (`trackerGrant`); a kind taken away since planning is noted on the step's timeline, and the step's schema and prompt leave it out. The Context tab shows what the step could ask for.
+Approval keeps the tracker settings with the run (`executions.story_json`), as it does for a run's story ([Inkuna's own updates](#inkunas-own-updates)), and does so for a run without a story whose steps may ask for changes, too. When a step starts, its kinds are narrowed to what those settings still allow, given the repository's and this machine's settings now (`trackerGrant`); a kind taken away since planning is noted on the step's timeline, and the step's schema and prompt leave it out. The Context tab shows what the step could ask for.
 
 When the step ends, Go checks every change before it is kept (`tracker.Guard.Check`), and only a step that completed has its changes checked:
 
@@ -413,18 +413,11 @@ A worker granted the tracker's own MCP server may read the tracker through it, b
 
 ### Storage
 
-The `tracker_changes` table (migration 025) holds each change: its run, round, step, the step run and A2A task that asked, its position in the handoff, kind, issue, the change as Go checked it (JSON), state, reason, URL, and when it was made and last changed (`storage.TrackerChange`). Inkuna's own updates are timeline events, not rows; the run keeps only its story and the settings it was approved under (`executions.story_json`, #154).
-
-## Safety conventions
-
-This change replaces two lines of the conventions' Safety section (`.inkuna/skills/conventions/SKILL.md`):
-
-| Before | After |
-| --- | --- |
-| No provider permission bypasses. No implicit MCP. | No provider permission bypasses. A worker starts only the MCP servers `inkuna.yaml` declares and its agent or stage is granted, or the user's own when they opt a runtime in, never one implicitly. A server's secrets reach the server, never the model. |
-| Linear is a read-only intake source. GitHub is the approval-gated execution projection. | Linear and GitHub issues are intake sources, and write-back targets only as far as the repository's `.inkuna/tracker.yaml` allows. Go makes every tracker write with the project's credential; an agent only asks, and its changes wait for a person's approval. A server of the user's own that they opt a runtime in to is the one exception: it is theirs, with every tool, and the approval screen says nothing reviews what it changes. GitHub is the approval-gated execution projection. |
+The `tracker_changes` table (migration 025) holds each change: its run, round, step, the step run and A2A task that asked, its position in the handoff, kind, issue, the change as Go checked it (JSON), state, reason, URL, and when it was made and last changed (`storage.TrackerChange`). Inkuna's own updates are timeline events, not rows; the run keeps only its story and the settings it was approved under (`executions.story_json`).
 
 ## Invariants
+
+The conventions' Safety section (`.inkuna/skills/conventions/SKILL.md`) states the same rules for every change.
 
 - Go is the only validator. Go builds each CLI's MCP configuration from `inkuna.yaml` and the grant, checks every tracker change, and makes every tracker write.
 - No MCP server starts unless it is declared and granted, or the user opted the runtime in to their own.
@@ -434,16 +427,17 @@ This change replaces two lines of the conventions' Safety section (`.inkuna/skil
 - Every MCP server a step had and every tracker write Inkuna made, applied or failed, is recorded on the run.
 - A failed tracker write never fails or reopens a run.
 
-## Open for the building issues
+## Checked against the CLIs
 
-- **#151**, settled on 2026-10-29 with stub servers on Claude Code 2.1.312, Codex 0.164.0, and Copilot 1.0.79. Only the granted servers start on each, and a step granted none starts none. Their listed tools are the only MCP tools allowed, and a server's secret never reaches the shell. Copilot's `--available-tools` must name a server's tools: it is the gate, and `--allow-tool` exposes nothing it hides. A command server Copilot starts runs inside its sandbox, so it reaches the network but not `localhost`, and only files in the worktree, `PATH` directories, the temp directory, and build caches. Copilot refuses a server on `localhost`, a URL server included, until the user's Copilot settings allow the local network. A granted server that does not start stops the call. A server declared with `tracker` and no `tools` list is refused.
-- **#152**, settled on 2026-11-01 with stub servers and the user's own on Claude Code 2.1.312, Codex 0.164.0, and Copilot 1.0.79. Claude Code's `allowedMcpServers`, passed in `--settings` without `--strict-mcp-config`, starts only the servers it lists, the `--mcp-config` ones included; a claude.ai connector or a plugin's HTTP server matches only by `serverUrl`, and connectors connect after the init event. Codex's listing prints a command server's literal `env` values, so they are handed on as declared secrets are. Copilot's listing says nothing of sign-in, and only its stream reports a server that needs it.
-- **#153** built the Linear probes in [Connections](#connections), which ask what a key may write without changing anything. Whether they tell a read-only key from a writing one is unverified: that rests on Linear checking a key's permissions before it looks an entity up, which no live Linear endpoint has confirmed. The tests only check Inkuna's reading of answers shaped like `Invalid scope: … required` and `Entity not found`; an answer of another shape shows as unknown rather than as a guess. One check with a live read-only key and a writing key settles it.
-- **#155**, settled on 2026-11-03: one handoff may ask for 20 changes, a comment's body and an issue's description may have 10,000 characters, and a title 256.
+- **Declared servers**, checked on 2026-10-29 with stub servers on Claude Code 2.1.312, Codex 0.164.0, and Copilot 1.0.79. Only the granted servers start on each, and a step granted none starts none. Their listed tools are the only MCP tools allowed, and a server's secret never reaches the shell. Copilot's `--available-tools` must name a server's tools: it is the gate, and `--allow-tool` exposes nothing it hides. A command server Copilot starts runs inside its sandbox, so it reaches the network but not `localhost`, and only files in the worktree, `PATH` directories, the temp directory, and build caches. Copilot refuses a server on `localhost`, a URL server included, until the user's Copilot settings allow the local network. A granted server that does not start stops the call. A server declared with `tracker` and no `tools` list is refused.
+- **The user's own servers**, checked on 2026-11-01 with stub servers and the user's own on Claude Code 2.1.312, Codex 0.164.0, and Copilot 1.0.79. Claude Code's `allowedMcpServers`, passed in `--settings` without `--strict-mcp-config`, starts only the servers it lists, the `--mcp-config` ones included; a claude.ai connector or a plugin's HTTP server matches only by `serverUrl`, and connectors connect after the init event. Codex's listing prints a command server's literal `env` values, so they are handed on as declared secrets are. Copilot's listing says nothing of sign-in, and only its stream reports a server that needs it.
+### Not yet verified
+
+- **The Linear probes** in [Connections](#connections) ask what a key may write without changing anything. Whether they tell a read-only key from a writing one is unverified: that rests on Linear checking a key's permissions before it looks an entity up, which no live Linear endpoint has confirmed. The tests only check Inkuna's reading of answers shaped like `Invalid scope: … required` and `Entity not found`; an answer of another shape shows as unknown rather than as a guess. One check with a live read-only key and a writing key settles it.
 
 ## Decisions
 
-From the interviews for #149 and #150 on 2026-10-28:
+From the design interviews on 2026-10-28:
 
 - MCP servers come both ways: declared in `inkuna.yaml` and granted per agent or stage, and, per runtime, the user's own.
 - Any step may be granted any server, read-only steps included.
@@ -453,27 +447,27 @@ From the interviews for #149 and #150 on 2026-10-28:
 - Changes are checked when the step ends, shown beside Approve, and applied when the run is approved. A change that fails does not block the approval; it is reported and can be retried.
 - The repository's `.inkuna/tracker.yaml` is the ceiling, and a machine's `inkuna.yaml` can lower it.
 - Inkuna moves the story to In Progress on start (refusing a Linear story outside the current cycle), comments the result at the end, and on request marks it Done after the merge, filling in only what the tracker's GitHub integration has not done.
-- Inkuna learns of a merge only when asked, from **Mark done** on the run. (#66 later added a pull request check when the Tasks view opens; it links pull requests and can remove worktrees, and never moves a story.)
+- Inkuna moves a story for a merge only when asked, from **Mark done** on the run. The Tasks view's pull request check links pull requests and can remove worktrees, and never moves a story.
 - For GitHub issues, In Progress and Done are the Status field of the repository's GitHub Project.
-- One Linear key, `LINEAR_API_KEY`, no longer described as read-only.
+- One Linear key, `LINEAR_API_KEY`, not described as read-only.
 
-From the #154 interview on 2026-11-02:
+On Inkuna's own updates, 2026-11-02:
 
 - A story update Inkuna makes on its own that fails is a warning on the timeline and a desktop notification. The Messages view lists agent threads, and a failed tracker write is not one.
 - With `linear.requireCurrentCycle`, planning refuses a story when Linear cannot be asked, as well as one outside the current cycle.
 
-From the review of #156:
+From the review of the design:
 
 - A tracker's own MCP server is granted read tools only. Every change to a tracker goes through `trackerChanges` and the review gate, so the rule that nothing reaches a tracker before approval has no exception.
 
-From the #155 interview on 2026-11-03:
+On the changes an agent asks for, 2026-11-03:
 
 - A change that fails after approval is a note on the asking step's thread in Messages, as well as a timeline warning, a desktop notification, and Retry on the run.
 - One handoff may ask for 20 changes; a body or description may have 10,000 characters, and a title 256.
 - A change Go cannot check because the tracker cannot be reached when the step ends is refused, saying so, rather than kept to check later.
 - The Agents view and the Rules editor edit an agent's and a stage's `tracker` kinds, as they do MCP servers.
 
-From the #151 interview on 2026-10-29:
+On declared MCP servers, 2026-10-29:
 
 - Settings has an MCP servers panel, and the Agents view and the Rules editor an MCP servers field beside Skills.
 - A peer consulted over A2A is given no MCP servers; only steps are, and every grant shows on the approval screen.

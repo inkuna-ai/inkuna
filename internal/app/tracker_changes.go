@@ -19,7 +19,7 @@ import (
 )
 
 // The tracker changes agents ask for in their handoffs
-// (docs/mcp-and-trackers.md#changes-an-agent-asks-for-155). Go checks each
+// (docs/mcp-and-trackers.md#changes-an-agent-asks-for). Go checks each
 // one when its step ends and keeps it, refused or pending; approving the run
 // at a review gate applies the pending changes of the steps before the
 // gate, apart from the run, and one that fails can be retried. Nothing an
