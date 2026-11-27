@@ -12,12 +12,12 @@ Documentation:
 - [Configuration](docs/configuration.md): `inkuna.yaml`, environment overrides, keychain secrets, the setup wizard
 - [Agents](docs/agents.md): authoring specialized agents and the handoff contract
 - [Rules](docs/rules.md): authoring `.inkuna/rules.yaml`
-- [Feedback rounds](docs/feedback-loop.md): sending a run's work back to the stages that wrote it, at a review gate or after it ends (design)
-- [MCP servers and tracker write-back](docs/mcp-and-trackers.md): granting workers MCP servers, and writing back to a run's Linear or GitHub issue (design)
+- [Feedback rounds](docs/feedback-loop.md): sending a run's work back to the stages that wrote it, at a review gate or after it ends
+- [MCP servers and tracker write-back](docs/mcp-and-trackers.md): granting workers MCP servers, and writing back to a run's Linear or GitHub issue
 - [The .inkuna directory](docs/inkuna-directory.md): what a repository's `.inkuna/` holds, how its conventions reach every runtime, and Inkuna's own
 - [Branching and worktrees](docs/branching.md): `.inkuna/branching.yaml`, branch naming per tracker, worktree location and cleanup, `inkunactl branch`
 - [Docs index](docs/docs-index.md): the frontmatter contract for project documentation and how Inkuna discovers it
-- [Extension API](docs/extensions.md): how another Go module embeds Inkuna and plugs in sinks, policies, identity, and definition sources through `pkg/inkuna` and `pkg/extension` (design)
+- [Extension API](docs/extensions.md): how another Go module embeds Inkuna and plugs in sinks, policies, identity, and definition sources through `pkg/inkuna` and `pkg/extension`
 
 ## Install
 
@@ -75,7 +75,7 @@ task dev          # desktop app with frontend live reload
 task package      # build/bin/Inkuna.app on macOS; inkunactl install puts it in place
 ```
 
-GitHub synchronization needs an authenticated GitHub CLI (`gh auth login -h github.com`). The **Connections** screen starts the `gh` and Claude Code browser flows and accepts a Linear personal API key for the session. The request composer accepts a Linear issue key such as `ENG-123` or a full `linear.app` issue URL; import is read-only. Connections also says whether the Linear key and gh's token can make the tracker writes a repository's `.inkuna/tracker.yaml` allows ([docs/mcp-and-trackers.md](docs/mcp-and-trackers.md#trackers-153)).
+GitHub synchronization needs an authenticated GitHub CLI (`gh auth login -h github.com`). The **Connections** screen starts the `gh` and Claude Code browser flows and accepts a Linear personal API key for the session. The request composer accepts a Linear issue key such as `ENG-123` or a full `linear.app` issue URL; import is read-only. Connections also says whether the Linear key and gh's token can make the tracker writes a repository's `.inkuna/tracker.yaml` allows ([docs/mcp-and-trackers.md](docs/mcp-and-trackers.md#trackers)).
 
 ## How a task flows
 

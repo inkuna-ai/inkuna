@@ -1,14 +1,14 @@
 ---
 title: Extension API
-lastUpdated: 2026-11-20
+lastUpdated: 2026-11-27
 author: Brandon Manning
 tags: [extensions, architecture, config, ui, storage, planning]
-status: draft
+status: current
 ---
 
 # Extension API
 
-Another Go module can embed Inkuna and plug extensions into it: sinks that receive what Inkuna records, policies that can refuse what Go allowed, an identity provider, definition sources, and screens of its own. Everything in Inkuna lives under `internal/`, which Go does not let another module import, so without a public seam there is nothing to plug into. This document designs the public seam: a composition root, `pkg/inkuna`, and a small set of extension points, `pkg/extension`. Built with no extensions, Inkuna behaves exactly as it does today. It is a design. So far `pkg/inkuna.Run` (#232), registering extensions with capabilities (#233), capability-gated extension screens (#234), the identity provider (#235), audit and usage sinks fed through the outbox (#236), policies at every decision point (#237), the `extensions:` configuration section (#238), definition sources, with the `catalog` mode applied (#239), `inkunactl usage export` (#240), and the secret store and notifiers (#241) are implemented; the rest is not (#204, #205, #230).
+Another Go module can embed Inkuna and plug extensions into it: sinks that receive what Inkuna records, policies that can refuse what Go allowed, an identity provider, definition sources, a secret store, notifiers, and screens of its own. Everything in Inkuna lives under `internal/`, which Go does not let another module import, so without a public seam there is nothing to plug into. This document describes that seam: a composition root, `pkg/inkuna`, and a small set of extension points, `pkg/extension`. Inkuna's own binary is built through the same root with no extensions, and a point with nothing registered changes nothing. Every point `extension.Registrar` offers is built, though definition sources apply only their `catalog` mode ([Definition sources](#definition-sources)); [What is not built](#what-is-not-built) lists what is missing, a tracker extension point among it.
 
 ## Decisions
 
@@ -18,7 +18,7 @@ Another Go module can embed Inkuna and plug extensions into it: sinks that recei
 | Public types | `pkg/extension` defines its own types, and `internal/app` converts at each call | Exposing `domain` structs would make every field of every internal type public API. |
 | Validation | Go's checks always run, and an extension can only refuse | Go stays the only validator ([architecture.md](architecture.md#trust-boundaries)). |
 | Storage | SQLite stays the store, and the store is not an extension point | Most of what it holds (worktrees, sessions, runs in flight) belongs to one machine, and a pluggable store would make nearly every domain type public. Records leave through sinks instead. See [Storage](#storage). |
-| Modes | Every shared definition carries a mode, and a mode a build does not apply fails closed | New modes can be built later without changing the API, and none is ever applied as something weaker. |
+| Modes | Every shared definition carries a mode, and a mode a build does not apply fails closed | A mode can be applied in a later build without changing the API, and none is ever applied as something weaker. |
 
 ## Embedding Inkuna
 
@@ -50,7 +50,7 @@ flowchart LR
 
 ## `pkg/inkuna`: the composition root
 
-`pkg/inkuna.Run` builds the service with `app.New` and calls `wails.Run` with the assets and `*app.Service` bound, as `main.go` used to do itself. `app.New` (`internal/app/service.go`) creates every dependency itself: the secret store (the keychain unless an extension registers one), runtimes from `inkuna.yaml`, the notifier, the store, and the A2A bus.
+`pkg/inkuna.Run` builds the service with `app.New` and calls `wails.Run` with the assets and `*app.Service` bound. `app.New` (`internal/app/service.go`) creates every dependency itself: the secret store (the keychain unless an extension registers one), runtimes from `inkuna.yaml`, the notifier, the store, and the A2A bus.
 
 ```go
 package inkuna
@@ -70,7 +70,7 @@ type Options struct {
 func Run(options Options) error
 ```
 
-Inkuna's own `main.go` checks that its frontend was built, then calls `inkuna.Run(inkuna.Options{Assets: assets, Icon: appIcon})`. `Run` passes the product and the extensions to the service, `app.New(dataDir, product, extensions)`, which registers the extensions before it reads any configuration. With the zero product and no extensions it behaves exactly as before. `inkunactl doctor` builds its service that way.
+Inkuna's own `main.go` checks that its frontend was built, then calls `inkuna.Run(inkuna.Options{Assets: assets, Icon: appIcon})`. `Run` passes the product and the extensions to the service, `app.New(dataDir, product, extensions)`, which registers the extensions before it reads any configuration. With the zero product and no extensions it is Inkuna's own app. `inkunactl doctor` builds its service that way.
 
 - **Assets.** `go:embed` reaches only files under the embedding package, and the built `ui/dist` sits beside the root package, so `pkg/inkuna` cannot embed it. Every binary passes the bundle it was built with, and `Run` refuses to start without one. Inkuna's `main.go` passes its own. An embedding binary builds its own bundle (see [The view](#the-view)) and passes that.
 - **Icon.** The Dock icon outside a bundle is set by cgo code in `pkg/inkuna` (`setDockIcon`), from the bytes the binary passes. Inkuna's `main.go` embeds `build/appicon.png` on macOS only. `pkg/inkuna` also links the `UniformTypeIdentifiers` framework on macOS, which Wails uses without linking, so every binary built through `Run` links it.
@@ -91,26 +91,22 @@ type Extension interface {
 }
 
 // Registrar is implemented by Inkuna and is valid only during Register.
-// Today it has Capability, Identity, AuditSink, UsageSink, Policy,
-// DefinitionSource, SecretStore, and Notifier; each other method arrives
-// with its point.
+// Inkuna gains a method here whenever an extension point is added.
 type Registrar interface {
 	Capability(Capability)
+	Identity(IdentityProvider)
 	AuditSink(AuditSink)
 	UsageSink(UsageSink)
 	Policy(Policy)
-	Identity(IdentityProvider)
 	DefinitionSource(DefinitionSource)
 	SecretStore(SecretStore)
 	Notifier(Notifier)
-	OnShutdown(func(context.Context) error)
-	// Later: TrackerProvider.
 }
 ```
 
-The registrar is the part Inkuna implements, so Inkuna can add methods to it without breaking an extension. Each point's own interface is the part an extension implements, so it stays small and never gains a method. New behaviour arrives as a new interface. One extension may register several points, so they can share one client and one sign-in.
+The registrar is the part Inkuna implements, so Inkuna can add methods to it without breaking an extension. Each point's own interface is the part an extension implements, so it stays small and never gains a method. New behaviour arrives as a new interface. One extension may register several points, so they can share one client and one sign-in. The registrar has no shutdown hook: an extension that holds resources releases them itself.
 
-`Run` refuses to start, naming the extension, when:
+`Run` refuses to start when the product has a version but no name, and, naming the extension, when:
 
 - an extension is nil, or its name is not a lower-case letter followed by lower-case letters, digits, or hyphens, or is `inkuna`, which namespaces Inkuna's own;
 - two extensions share a name;
@@ -180,7 +176,7 @@ type Product struct {
 }
 ```
 
-A capability's ID is its extension's name, a dot, then lower-case letters and digits, separated by single dots or hyphens, and is unique in the build. The `Capabilities()` binding (`internal/app/extensions.go`) returns the product, and the capabilities of Inkuna and of every extension in registration order, each with the extension that registered it. The product carries `inkuna` when it is Inkuna's own, and Settings names an embedding product and what its extensions add beside Inkuna's build. Today the view learns what exists only from fixed bindings (`Dashboard`, `Configuration`, `AuthenticationStatus`, `Runtimes`), and navigation is a static list in `App.tsx`. Inkuna's own views stay unconditional. A capability gates only what an extension adds.
+A capability's ID is its extension's name, a dot, then lower-case letters and digits, separated by single dots or hyphens, and is unique in the build. The `Capabilities()` binding (`internal/app/extensions.go`) returns the product and every extension's capabilities in registration order, each with the extension that registered it. The product carries `inkuna` when it is Inkuna's own, and Settings names an embedding product and what its extensions add beside Inkuna's build. Inkuna registers no capabilities of its own, so with no extensions the list is empty: Inkuna's own views stay unconditional, and a capability gates only what an extension adds ([The view](#the-view)).
 
 ### Audit sink
 
@@ -203,18 +199,18 @@ type AuditSink interface {
 }
 ```
 
-`pkg/extension` types carry JSON tags, so a sink that forwards them as JSON sends the same names everywhere. Every source of audit events has one choke point:
+The records, decisions, and definitions in `pkg/extension` carry JSON tags, so a sink that forwards them as JSON sends the same names everywhere. Every source of audit events has one choke point:
 
 | Kind | Choke point | What it carries |
 | --- | --- | --- |
 | `run.event` | `Store.AppendEvent`, which `Service.appendRunEvent` (`internal/app/workflow.go`) calls for every run event | The event's kind, step, step run, sequence, and any artifact's digest, and the run's task, project, and approver, queued in the event's own transaction. Never the event's summary: summaries are written for the run's timeline, and every kind can hold what a worker, a command, or a person wrote, redacted of secrets but not of content. A tool event names a command or starts its output, a file change carries the tool's input, a warning a line of stderr, an error a failed check's log or the worker's failure, a completion the worker's handoff, and a lifecycle event can quote a step's prompt. A `message` event is what an agent said, part of its transcript, and a `usage` event belongs to the usage sinks, so neither is audited. The actor is the step's agent for tool calls, file changes, and completion, and `inkuna` otherwise. |
 | `tracker.write` | The run event `recordTrackerWrite` appends for a `tracker.Guard` write | Recorded with its own kind instead of `run.event`, by its structured fields: the tracker, action, kind or update, issue, outcome, and URL. Its description and reason stay out, since they can quote the comment or title it wrote. |
-| `a2a.task` | A second observer on the bus (`a2a.WithObserver`, now a list, so `notifyThread` keeps its own) | A task when it is sent and each time its state changes, once per state: an artifact added to a task that has ended records nothing more. Its agent, state, and how many messages and artifacts it holds, never what they say. |
+| `a2a.task` | A second observer on the bus (`a2a.WithObserver`, which takes several, so `notifyThread` keeps its own) | A task when it is sent and each time its state changes, once per state: an artifact added to a task that has ended records nothing more. Its agent, state, and how many messages and artifacts it holds, never what they say. |
 | `approval` | `startApproved`, `resumeRun`, `ApproveReview`, `requestChanges`, `AnswerInput` | `Fields["decision"]` is `plan.approve`, `run.resume`, `run.rerun`, `review.approve`, `review.changes`, or `input.answer`, with the principal who decided. The summary is Inkuna's wording alone, without the run's title, and the run, task, and project are named by ID. An answer names the option chosen when it was one offered, never written text. |
 | `config.save`, `rules.save`, `library.save`, `agent.save`, `agent.delete` | `saveConfigurationLocked`, `SaveRules`, `SaveGlobalDefinition`, `SaveAgent`, `DeleteAgent` | The file's path and the `sha256:` digest of the bytes the save wrote, never its content. The digest is of what was written, not of the file read back, which another save could have replaced by then. |
 | `history.delete` | `DeleteTasks`, `DeleteRun` | The task and the runs removed. |
 
-Saves and deletions never asked for a principal before, so their events name one when the identity provider answers and leave it empty when it does not, rather than undoing the change.
+Saves and deletions do not otherwise ask who is acting, so their events name a principal when the identity provider answers and leave it empty when it does not, rather than undoing the change.
 
 **Delivery.** With an audit sink or a usage sink registered, Inkuna stores each record in an outbox table before handing it on (`internal/storage/outbox.go`). A delivery loop per sink (`internal/app/outbox.go`) then gives it the records of its kind in order, so a slow or failing sink never blocks a run and a crash never loses a record:
 
@@ -249,7 +245,7 @@ type Policy interface {
 }
 ```
 
-A policy runs only after all of Go's own checks have passed, so it can refuse what Go would allow but never allow what Go refused. The first version can only refuse. Narrowing, such as dropping one MCP server from a grant rather than refusing the step, would need a policy to return a changed decision, and Go would have to prove it a subset of the one it allowed. It comes later, point by point, if an extension needs it.
+A policy runs only after all of Go's own checks have passed, so it can refuse what Go would allow but never allow what Go refused. A verdict can only refuse. Narrowing, such as dropping one MCP server from a grant rather than refusing the step, is not built: it would need a policy to return a changed decision, and Go would have to prove it a subset of the one it allowed.
 
 `Service.decide` (`internal/app/policy.go`) asks the policies in registration order and stops at the first refusal. Each is given its own copy of the decision, so one cannot change what the next is asked. A detail with no value is left out, a list is sorted and comma-separated, and commands are one per line, since a command can hold a comma. A saved file is named by its path and the `sha256:` digest of the bytes the save would write, never by its content.
 
@@ -270,7 +266,7 @@ A policy runs only after all of Go's own checks have passed, so it can refuse wh
 - **Reasons.** A policy is named as a sink is, by its extension and its place among that extension's policies: `example/policy`, then `example/policy-2`. A refusal reads `policy "example/policy": Only release managers approve plans`, one without a reason `policy "example/policy" refuses this`, an error `policy "example/policy" could not decide, so this is refused: …`, and a timeout `policy "example/policy" did not decide within 10s, so this is refused; try again`.
 - **Locks.** `config.save` and `plan.approve` hold `configMu` while the policies answer, so the configuration cannot change between Go's checks and the write or the run's start; a slow policy holds up other saves for at most its deadline. `agent.save` holds `agentFilesMu` from the check that the name is free to the write, as an agent deletion does, so two saves cannot both find a name free. `permission.grant` asks without the step's lock.
 - **The deadline wins.** An answer that arrives as the deadline passes refuses: `askPolicy` checks the deadline after it has an answer, since either may be taken first when both are ready.
-- **No policy, no change.** With no policy registered, `decide` returns at once and asks no one who is acting, so a build without policies behaves as before.
+- **No policy, no change.** With no policy registered, `decide` returns at once and asks no one who is acting, so a build without policies decides as Go alone does.
 
 ```mermaid
 sequenceDiagram
@@ -349,7 +345,7 @@ type IdentityProvider interface {
 }
 ```
 
-- **The default.** With no provider registered, the principal is the OS user (`os/user.Current`): its user name as the ID, with no groups, and Inkuna behaves as today. A build without a provider never refuses a decision for want of a name: when the OS cannot name its user, the ID is empty, as on rows from before principals were recorded.
+- **The default.** With no provider registered, the principal is the OS user (`os/user.Current`): its user name as the ID, with no groups. A build without a provider never refuses a decision for want of a name: when the OS cannot name its user, the ID is empty, as on rows from before principals were recorded.
 - **Where it is read.** `Service.principal` (`internal/app/identity.go`) asks before every decision that needs a person changes anything: planning a task (`PlanWorkflow`), approving a plan or starting a run over (`startApproved`), resuming a run (`resumeRun`), approving a review (`ApproveReview`), sending changes or replying to a review (`requestChanges`), and answering input (`AnswerInput`). Policies ask at every policy point ([Policy](#policy)). The ID is stored on the task, who created it (`tasks.created_by`, through `Store.CreateTask`), and on the run, who approved it (`executions.approved_by`), so a usage record names who started the work even when it is delivered days later. Both are written with the row and never change: renaming a plan keeps its creator, and a resume or a new round keeps the run's approver. Migration 034 adds the two columns, empty for existing rows.
 - **Failure.** When the provider returns an error, names no one (an empty ID), or does not answer within 30 seconds, the decision is refused before anything changes, with the provider's reason and its extension's name, such as `identity provider "example": Sign in to continue`. Runs already started go on, under the principal they recorded.
 - **Not for models.** A principal goes to records and policies only. It is stored apart from the task's spec, which prompts are built from, and never enters a worker's or the orchestrator's prompt.
@@ -358,7 +354,7 @@ Role-based approvals need nothing more: a policy reads `Decision.Principal.Group
 
 ### Definition sources
 
-Agents, skills, stages, groups, and rules come today from three places: built-in, the global directories, and the repository's `.inkuna/` ([rules.md](rules.md#where-definitions-come-from), [agents.md](agents.md)). The catalog offers more to copy in ([inkuna-directory.md](inkuna-directory.md#the-catalog)). A definition source adds definitions from outside the machine, already filtered by the source to those the principal may use in the project:
+Without a source, agents, skills, stages, groups, and rules come from three places: built-in, the global directories, and the repository's `.inkuna/` ([rules.md](rules.md#where-definitions-come-from), [agents.md](agents.md)). The catalog offers more to copy in ([inkuna-directory.md](inkuna-directory.md#the-catalog)). A definition source adds definitions from outside the machine, already filtered by the source to those the principal may use in the project:
 
 ```go
 type DefinitionKind string // "agent", "skill", "stage", "group", "rule"
@@ -399,7 +395,7 @@ type DefinitionSource interface {
 }
 ```
 
-Each mode places a definition differently:
+Each mode places a definition differently. Only `catalog` is applied; the `shared` and `enforced` rows and the live layers in the diagram are where a build that applies those modes would place a definition, and the last column says what this build does instead.
 
 ```mermaid
 flowchart LR
@@ -410,13 +406,13 @@ flowchart LR
     C["catalog<br/>(source)"] -- "inkunactl catalog add<br/>copies into .inkuna/" --> R
 ```
 
-| Mode | Agents, stages, groups | Skills | Rules | Built |
+| Mode | Agents, stages, groups | Skills | Rules | This build |
 | --- | --- | --- | --- | --- |
-| `catalog` | Listed beside the built-in catalog, named by source and scope; `catalog add` copies them in, as it copies built-in items today | Copied into `.inkuna/skills/` | Copied first under `rules:`, as today | Yes (#239) |
-| `shared` | A layer between global and repository: `agent.Build` and `rules.LoadLibrary` gain it, and the repository wins by name | Join the repository's skills, which win by name | Matched after the repository's rules, before `default` | Later; listed as not applied |
-| `enforced` | Above the repository: a repository definition of the same name is replaced, and the plan says so | Attached to every agent step in the project, as `conventions` is here | Matched before the repository's rules | Later; refuses plans |
+| `catalog` | Listed beside the built-in catalog, named by source and scope; `catalog add` copies them in, as it copies built-in items | Copied into `.inkuna/skills/` | Copied first under `rules:`, as built-in rules are | Applied |
+| `shared` | A layer between global and repository: read by `agent.Build` and `rules.LoadLibrary`, and the repository wins by name | Join the repository's skills, which win by name | Matched after the repository's rules, before `default` | Not applied: listed as not applied, and ignored |
+| `enforced` | Above the repository: a repository definition of the same name is replaced, and the plan says so | Attached to every agent step in the project, as `conventions` is here | Matched before the repository's rules | Not applied: refuses every plan in the project |
 
-The interface carries all three modes now, so shared and enforced definitions can be built later without changing the API. This build applies `catalog` only. Until a mode is built, Go treats it so that nothing weaker than it promises happens (`sources.Read`, `internal/sources/read.go`):
+The interface carries all three modes, so a build can apply shared and enforced definitions without changing the API. This build applies `catalog` only, and treats the other modes so that nothing weaker than they promise happens (`sources.Read`, `internal/sources/read.go`):
 
 - A `shared` definition that this build does not apply is listed as not applied, with the reason, and ignored. Ignoring it loosens nothing. A plan notes each one.
 - An `enforced` definition that this build does not apply refuses every plan in the project, naming the definition and its scope: `definition source "example/source" enforces rule "release" for team:platform, which this build does not apply, so plans in this project are refused until the source changes it or a build that applies it is used`. Applying it as `shared` or ignoring it would let a repository override what was required of it.
@@ -428,13 +424,13 @@ A source is named as a sink is, by its extension and its place among that extens
 
 **Catalog mode.** A source's `catalog` definitions are checked as items of the built-in catalog are (`catalog.FromSource`): each file in its kind's format and named as its definition, no name shared with another of the source's definitions or taken by a built-in, everything it needs built in or offered by the same source, and the catalog's own requirements, such as a description and a rule's narrowing `when`. Unlike the built-in catalog, one that fails is not fatal: it is reported, with Go's reason, and left out with every definition that needs it. The rest are listed beside the built-in catalog, each naming its source and scope, in Settings' catalog dialogs (`CatalogItems`, whose listing carries each source's report) and by `inkunactl catalog list`, and added as built-in items are, from the source that offers them (`AddCatalogItem(project, name, source, global)`, `inkunactl catalog add NAME --source SOURCE`). An added agent records `catalogSource`, `catalogScope`, and `catalogVersion` beside `catalog:`. A source shares a definition for a project, so one is never added to the global directories. Skills are a catalog kind for every catalog: a skill is copied whole into `.inkuna/skills/<name>/`, through a temporary directory beside it renamed into place, so a plan never finds half of one, and an agent brings the catalog's skills it names. Skills can be added only to a repository.
 
-**Checked like local files.** Every definition is parsed and checked by the same code as a file on disk: an agent as an agent file, a skill by `skill.LoadFS` (the `fs.FS` form of `skill.Load`), a stage or group by `rules.ParseLibrary`, a rule by `rules.Parse`. When shared skills are applied, the five call sites that discover skills today, each reading the repository's `.inkuna/skills`, become one service method that adds the source's skills. A shared definition that fails will be reported, in Settings under **Stage library** and by `inkunactl stages list`, as a broken library file is, and skipped; an enforced one that fails refuses plans in the project. A source definition gets no more than a repository definition would: the MCP servers and secrets it names must still be declared in `inkuna.yaml`, and every grant goes through the same checks.
+**Checked like local files.** Every definition is parsed and checked by the same code as a file on disk: an agent as an agent file, a skill by `skill.LoadFS` (the `fs.FS` form of `skill.Load`), a stage or group by `rules.ParseLibrary`, a rule by `rules.Parse`. Only `catalog` definitions reach these checks in this build. Applying shared skills would need the places that discover skills, each of which reads the repository's `.inkuna/skills` itself, to share one service method that adds the source's skills; a shared definition that failed would be reported as a broken library file is and skipped, and an enforced one that failed would refuse plans in the project. A source definition gets no more than a repository definition would: the MCP servers and secrets it names must still be declared in `inkuna.yaml`, and every grant goes through the same checks.
 
 **Offline.** Go keeps the last snapshot each source gave for each repository in `<data dir>/sources/`, one JSON file per source and repository, replaced atomically (`internal/sources/cache.go`). When the source cannot be reached, the kept snapshot is used, and the plan notes how old it is; an `enforced` definition in it keeps refusing plans. With no snapshot kept, the source adds nothing, and the plan says so. A kept snapshot is the last one Go saw for the project, so nothing else records whether one held `enforced` definitions.
 
 **inkunactl.** It registers no extensions, so it cannot ask a source. `inkunactl catalog list`, `show`, and `add` offer what the app kept of the repository's sources, checked as the app checks it, and `inkunactl catalog sources [REPOSITORY]` prints each kept snapshot's report: what this build does with each definition, and why. A name that two sources offer, or a source and the built-in catalog, is chosen with `--source`; without it the built-in catalog's item is taken.
 
-**Recorded.** A plan records each snapshot it was made with (`WorkflowSpec.Sources`): the source, the snapshot's version, when it was given, and whether it was a kept one. A `catalog` definition is copied before any plan uses it, so it is a repository definition by then and no plan uses one as a source's; when shared and enforced definitions are applied, a plan records each it used with its mode, scope, version, and digest (`rules.Definition.Digest`), so a run can be traced to the exact definition that shaped it. Expansion already records each stage's `from:` scope and file; the scopes gain `shared` and `enforced`, and the file names the source and version.
+**Recorded.** A plan records each snapshot it was made with (`WorkflowSpec.Sources`): the source, the snapshot's version, when it was given, and whether it was a kept one. A `catalog` definition is copied before any plan uses it, so it is a repository definition by then and no plan uses one as a source's. Expansion records each stage's `from:` scope and file. Applying shared and enforced definitions would add those two scopes, and have a plan record each such definition it used with its mode, scope, version, and digest (`rules.Definition.Digest`); none of that is built.
 
 **Inkuna only consumes snapshots.** Who may see a definition, and publishing one, are the source's business. An extension that offers publishing from the app does it with its own screen and a service bound through `Options.Bind`.
 
@@ -501,7 +497,7 @@ flowchart LR
 
 ## Configuration
 
-`inkuna.yaml` decodes strictly (`KnownFields`), so an extension cannot add a key of its own. Instead there is one new section, keyed by extension name, whose body the extension decodes strictly itself:
+`inkuna.yaml` decodes strictly (`KnownFields`), so an extension cannot add a key of its own. Instead it has one section, keyed by extension name, whose body the extension decodes strictly itself:
 
 ```yaml
 extensions:
@@ -540,7 +536,7 @@ export function renderInkuna(root: HTMLElement, views: ExtensionView[]): Root;
 
 `main.tsx` calls `renderInkuna(root, [])`. An embedding frontend imports `extension.tsx` from its Inkuna checkout, passes its views, and builds its own bundle, which `Options.Assets` serves. `renderInkuna` refuses two views with one ID, since only one could ever be shown, and returns the React root so a test can unmount it.
 
-- **Gated by Go.** A view is listed and rendered only while Go's `Capabilities()` binding reports its ID, so a build that lacks the extension never shows its screen. With no views the app never asks: it looks and behaves as it did before.
+- **Gated by Go.** A view is listed and rendered only while Go's `Capabilities()` binding reports its ID, so a build that lacks the extension never shows its screen. With no views the app never asks, and shows only Inkuna's own screens.
 - **Navigation is data.** `frontend/src/navigation.ts` holds Inkuna's screens, which are never gated, and adds each shown extension screen at the end of its group. The `View` union in `types.ts` is `BuiltInView | ExtensionViewID`. Go namespaces every capability by its extension, so a capability ID always has a dot and never equals a built-in view's name.
 - **No second copy of a rule.** The view keeps no copy of any rule: extension screens show Go's reasons as Inkuna's own do.
 
@@ -560,34 +556,29 @@ export function renderInkuna(root: HTMLElement, views: ExtensionView[]): Root;
 | A source definition is checked like a local file and granted no more. | Each kind goes through the parser and checks its local file does (`catalog.FromSource`, `internal/catalog/source_test.go`); MCP servers and secrets must be declared in `inkuna.yaml`. |
 | An enforced definition is never applied as anything weaker. | `sources.Read` refuses the project's plans for an enforced definition, or one of a mode or kind the build does not know, at planning and at approval, from a kept snapshot when the source cannot be reached; `internal/app/sources_test.go` covers each mode. |
 | No shell, no push, no provider permission bypass. | Unchanged: extensions get no hook into how commands run. |
-| Inkuna with no extensions behaves exactly as today. | `app.New` with no extensions takes the paths it does now; the existing suite runs unchanged. |
+| A point with nothing registered changes nothing. | Each point returns early without one: `decide` asks no one, nothing is written to the outbox and no delivery loop runs, `readSources` asks no one, and the keychain stays the secret store. Inkuna's own binary and the test suite run with no extensions. |
 | `pkg/` names no `internal/` type. | `pkg/inkuna/publicapi_test.go` reads every `pkg/` package as the compiler type-checked it (`go list -export`) and fails when an exported identifier, field, or method refers to a type in an `internal/` package. |
-| The API works from outside the module. | `examples/embed/`, a separate module with a `replace` of this one, builds a binary from `pkg/` alone in `task ci` (`build:example`), registering a sample extension with a capability and an `extensions:` section under its own product. |
+| The API works from outside the module. | `examples/embed/`, a separate module with a `replace` of this one, builds a binary from `pkg/` alone in `task ci` (`build:example`), registering a sample extension with a capability, an audit sink, a policy, and an `extensions:` section under its own product. |
 
 ## Stability
 
-`pkg/inkuna` and `pkg/extension` are the only public API. While the module is `v0`, a breaking change to them is allowed but called out in the release notes. API diffs are checked in CI against the last tag. A breaking change is removing or changing an exported identifier, or adding a method to an interface an extension implements. Adding a `Registrar` method, an `Options` field, or a new interface is not one. Neither is a new `DefinitionMode` or `DefinitionKind`, since a build that does not know one refuses rather than misreads it, nor a new field on `UsageRecord` or `AuditEvent`, which a receiver must accept as JSON it may ignore.
+`pkg/inkuna` and `pkg/extension` are the only public API. While the module is `v0`, a breaking change to them is allowed but called out in the release notes. No check compares the API with the last tag: `publicapi_test.go` checks only that `pkg/` names no `internal/` type. A breaking change is removing or changing an exported identifier, or adding a method to an interface an extension implements. Adding a `Registrar` method, an `Options` field, or a new interface is not one. Neither is a new `DefinitionMode` or `DefinitionKind`, since a build that does not know one refuses rather than misreads it, nor a new field on `UsageRecord` or `AuditEvent`, which a receiver must accept as JSON it may ignore.
 
 ## Open questions
 
 - **An embedding binary's `inkunactl`.** Should `pkg/inkuna` also export the CLI (`RunCLI(args, Options)`), so its writes (`tasks delete`, `branch new`, catalog adds) pass through registered policies, and its catalog asks the sources rather than reading what the app kept? Until then, policies govern the app only.
-- **Outbox retention.** How long are delivered records kept, and is there a cap on undelivered ones? Nothing is pruned yet: every record stays in the outbox, which is also what lets a sink added later be given what is still there.
+- **Outbox retention.** How long are delivered records kept, and is there a cap on undelivered ones? Nothing is pruned: every record stays in the outbox, which is also what lets a sink added later be given what is still there.
 - **How stale an enforced snapshot may be.** Should a cached snapshot holding `enforced` definitions expire, refusing plans until the source is reached again, and after how long?
-- **Enforced rules and gates.** Matching an enforced rule first replaces a repository's flow. What may be wanted instead is a required stage, such as a security review, inserted into whichever flow matched. That needs its own design when enforcement is built, and may be a fourth kind rather than a rule.
+- **Enforced rules and gates.** Matching an enforced rule first replaces a repository's flow. What may be wanted instead is a required stage, such as a security review, inserted into whichever flow matched. That needs its own design before enforcement is applied, and may be a fourth kind rather than a rule.
 
-## Plan
+## What is not built
 
-The issues under #204 follow this order:
+Everything above is built except:
 
-1. `pkg/inkuna.Run(Options)`, with `main.go` calling it and no change in behaviour, plus `examples/embed/` built in CI.
-2. `pkg/extension` with `Extension`, `Registrar`, and capabilities; the `Capabilities()` binding; the check that `pkg/` names no `internal/` type.
-3. The view: `renderInkuna(root, views)` and capability-gated extension views.
-4. Identity: `IdentityProvider` with the OS user as the default, the principal stored on tasks and runs, and refusals when it fails.
-5. The outbox, with the audit sink and the usage sink, the installation ID, the backfill, and Doctor's backlog report.
-6. Policies at each point in the table above, with the principal in each decision.
-7. The `extensions:` configuration section.
-8. Definition sources: every type and all three modes in `pkg/extension`, `catalog` mode built, `shared` reported as not applied, and `enforced` refusing (#239, done).
-9. `inkunactl usage export` (#240, done).
-10. Secret store and notifier extension points (#241, done).
+- **The `shared` and `enforced` modes.** `pkg/extension` defines them, and `sources.Read` lists a shared definition as not applied and refuses plans for an enforced one ([Definition sources](#definition-sources)).
+- **Tracker providers.** Trackers are chosen by kind inside `internal/tracker` ([Later points](#later-points)).
+- **A CLI entry for an embedding binary.** `inkunactl` registers no extensions ([Open questions](#open-questions)).
+- **Narrowing policies.** A policy can only refuse ([Policy](#policy)).
+- **An API diff check.** Nothing compares `pkg/` with the last tag ([Stability](#stability)).
 
-The `shared` and `enforced` modes, tracker providers, and the CLI entry follow when an extension needs them.
+Each is added when an extension needs it, and a new point comes with a no-op default and tests ([Embedding Inkuna](#embedding-inkuna)).
