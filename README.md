@@ -23,7 +23,7 @@ Documentation:
 
 Continuous integration runs every check, and installs the app, on macOS, Ubuntu, and Windows.
 
-With Git and Go 1.25+ installed, one line installs Inkuna:
+Each [release](https://github.com/inkuna-ai/inkuna/releases) has a macOS disk image, a Windows installer, and a Linux archive, which need nothing else installed ([Downloading a release](docs/install.md#downloading-a-release)). To build it yourself instead, with Git and Go 1.25+ installed, one line installs Inkuna:
 
 ```sh
 git clone https://github.com/inkuna-ai/inkuna.git && cd inkuna && go run ./cmd/inkunactl install

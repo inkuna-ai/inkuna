@@ -1,25 +1,40 @@
 # A v* tag on main is a release, which inkunactl update's stable channel
-# follows. This checks the tag and publishes the release's notes: the titles
-# of the pull requests merged since the previous release. It builds nothing;
-# inkunactl install and update build from source.
+# follows. This checks the tag, builds the downloads on each platform, and
+# publishes them with the release's notes: the titles of the pull requests
+# merged since the previous release. docs/install.md describes the downloads.
 name: Release
 
 on:
   push:
     tags:
       - "v*"
+  # A pull request that changes how the downloads are made builds them,
+  # without publishing anything, so a broken package shows before a tag.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "build/**"
+      - "wails.json"
+      - "Taskfile.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A newer push to a pull request replaces its build; a release always
+  # finishes.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  check:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          # Every commit and tag, for the notes and the check that the tag
-          # is on main.
+          persist-credentials: false
+          # Every commit and tag, for the check that the tag is on main.
           fetch-depth: 0
 
       - name: Check the tag
@@ -33,7 +48,7 @@ jobs:
             exit 1
           fi
           # The packaged app shows wails.json's version, kept equal to the
-          # frontend's (package_test.go).
+          # frontend's (package_test.go), and the downloads are named by it.
           for file in wails.json frontend/package.json; do
             case "$file" in
               wails.json) declared="$(jq -r .info.productVersion "$file")" ;;
@@ -50,26 +65,185 @@ jobs:
             exit 1
           fi
 
+  package:
+    needs: check
+    # On a pull request the check is skipped, and the packages still build.
+    if: ${{ !failure() && !cancelled() }}
+    strategy:
+      # One platform's failure must not hide whether the others package.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            os: macos-latest
+          - platform: windows
+            os: windows-latest
+          # The oldest Ubuntu runner, so the app needs the oldest glibc and
+          # runs on Ubuntu 22.04 and later.
+          - platform: linux
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      # The notices and the installer's text files are copied as committed.
+      - name: Keep line endings as committed
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # git describe stamps the build with the tag (Taskfile.yml).
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.x"
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: go-task/setup-task@v2
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      # wails build -nsis runs makensis, which the Windows image lacks.
+      - name: Install NSIS
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          choco install nsis --yes --no-progress
+          echo 'C:\Program Files (x86)\NSIS' >> "$GITHUB_PATH"
+      - run: task deps
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(jq -r .info.productVersion wails.json)"
+          mkdir -p dist
+          # Every download carries the licenses its binaries are shipped
+          # under.
+          licenses=(LICENSE.md NOTICE THIRD_PARTY_NOTICES)
+          case "$RUNNER_OS" in
+            macOS)
+              # One app and one inkunactl for Apple silicon and Intel.
+              task package -- -platform darwin/universal
+              GOARCH=arm64 task build:go && mv bin/inkunactl bin/inkunactl-arm64
+              GOARCH=amd64 task build:go && mv bin/inkunactl bin/inkunactl-amd64
+              lipo -create -output bin/inkunactl bin/inkunactl-arm64 bin/inkunactl-amd64
+              # Until the app is signed with a Developer ID, an ad-hoc
+              # signature lets macOS open it once the user allows it, rather
+              # than call it damaged.
+              codesign --force --deep --sign - build/bin/Inkuna.app
+              codesign --force --sign - bin/inkunactl
+
+              stage="$RUNNER_TEMP/dmg"
+              mkdir -p "$stage"
+              cp -R build/bin/Inkuna.app "$stage/"
+              ln -s /Applications "$stage/Applications"
+              cp "${licenses[@]}" "$stage/"
+              hdiutil create -volname Inkuna -srcfolder "$stage" -format UDZO -ov "dist/Inkuna-$version-macos-universal.dmg"
+
+              cli="inkunactl-$version-macos-universal"
+              mkdir -p "$RUNNER_TEMP/$cli"
+              cp bin/inkunactl "${licenses[@]}" "$RUNNER_TEMP/$cli/"
+              tar -czf "dist/$cli.tar.gz" -C "$RUNNER_TEMP" "$cli"
+              ;;
+            Windows)
+              # The installer takes inkunactl.exe from bin/ (project.nsi).
+              task build:go
+              task package -- -nsis
+              cp build/bin/Inkuna-amd64-installer.exe "dist/Inkuna-$version-windows-amd64-installer.exe"
+              ;;
+            Linux)
+              task package
+              task build:go
+              name="inkuna-$version-linux-amd64"
+              mkdir -p "$RUNNER_TEMP/$name"
+              cp build/bin/Inkuna "$RUNNER_TEMP/$name/inkuna"
+              cp bin/inkunactl "${licenses[@]}" "$RUNNER_TEMP/$name/"
+              cp build/appicon.png "$RUNNER_TEMP/$name/inkuna.png"
+              tar -czf "dist/$name.tar.gz" -C "$RUNNER_TEMP" "$name"
+              ;;
+          esac
+          ls -l dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: downloads-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [check, package]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # The build attestations.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # Every commit and tag, for the notes.
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: downloads-*
+          path: dist
+          merge-multiple: true
+
+      - name: Write the checksums
+        working-directory: dist
+        run: sha256sum -- * | tee SHA256SUMS
+
+      # Lets anyone check that a download was built here, from this tag:
+      # gh attestation verify <file> --repo inkuna-ai/inkuna.
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*
+
       - name: Write the notes
         env:
           TAG: ${{ github.ref_name }}
         run: |
           previous="$(git tag --list --merged "$TAG^" --sort=-v:refname 'v*' 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
           range="$TAG"
-          if [ -n "$previous" ]; then
-            range="$previous..$TAG"
-            echo "Merged since $previous:" > notes.md
-          else
-            echo "The first release of Inkuna." > notes.md
-          fi
-          echo >> notes.md
-          # Pull requests are squash-merged under their titles, so each
-          # first-parent subject is one.
-          git log --first-parent --format='- %s' "$range" >> notes.md
+          {
+            if [ -n "$previous" ]; then
+              range="$previous..$TAG"
+              echo "Merged since $previous:"
+            else
+              echo "The first release of Inkuna."
+            fi
+            echo
+            # Pull requests are squash-merged under their titles, so each
+            # first-parent subject is one.
+            git log --first-parent --format='- %s' "$range"
+          } > notes.md
+          cat >> notes.md <<'EOF'
+
+          ## Downloads
+
+          - **macOS**, Apple silicon and Intel: open the `.dmg` and drag Inkuna to Applications. `inkunactl` is in the `macos-universal.tar.gz`.
+          - **Windows**: run the installer. It installs for your user, without administrator rights, and adds Inkuna to the Start menu.
+          - **Linux**, x86-64, Ubuntu 22.04 or later: extract the `.tar.gz`. The app needs GTK 3 and WebKitGTK 4.1 (`sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0`).
+
+          These builds are not signed yet. On macOS, the first time you open Inkuna, allow it in System Settings > Privacy & Security. On Windows, SmartScreen may ask you to confirm. `SHA256SUMS` lists each file's checksum, and `gh attestation verify <file> --repo inkuna-ai/inkuna` checks that a file was built by this workflow. [Installing Inkuna](https://docs.inkuna.ai/install/#downloading-a-release) has the details.
+          EOF
           cat notes.md
 
       - name: Publish the release
         env:
           TAG: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$TAG" --verify-tag --title "Inkuna $TAG" --notes-file notes.md
+        run: gh release create "$TAG" --verify-tag --title "Inkuna $TAG" --notes-file notes.md dist/*

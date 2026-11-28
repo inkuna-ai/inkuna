@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inkuna-ai/inkuna/internal/install"
 	"github.com/inkuna-ai/inkuna/internal/secrets"
 )
 
@@ -62,6 +63,71 @@ func TestThePackageIsInkunas(t *testing.T) {
 		if value == "" || strings.Contains(strings.ToLower(value), "wails") {
 			t.Errorf("wails.json: info.%s is %q", field, value)
 		}
+	}
+}
+
+// TestTheWindowsInstallerMatchesTheLayout keeps the installer a release
+// ships putting the app, inkunactl, and the Start menu shortcut where
+// inkunactl install does, for the current user. An install from either one
+// then replaces the other, and inkunactl update finds what the installer put
+// in place.
+func TestTheWindowsInstallerMatchesTheLayout(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("build", "windows", "installer", "project.nsi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var project struct {
+		Name string
+		Info struct{ ProductName string }
+	}
+	readJSON(t, "wails.json", &project)
+	// project.nsi names the app through wails_tools.nsh's defines, which
+	// wails build fills in from wails.json. A checkout with Git's autocrlf
+	// has CRLF line endings.
+	nsi := strings.NewReplacer(
+		"\r\n", "\n",
+		"${INFO_PRODUCTNAME}", project.Info.ProductName,
+		"${PRODUCT_EXECUTABLE}", project.Name+".exe",
+	).Replace(string(data))
+
+	// Admin rights would install for every user, under Program Files.
+	for _, want := range []string{`!define REQUEST_EXECUTION_LEVEL "user"`, `!define WAILS_INSTALL_SCOPE "user"`} {
+		if !strings.Contains(nsi, want+"\n") {
+			t.Errorf("project.nsi lacks %s", want)
+		}
+	}
+
+	local, roaming := `C:\Users\ada\AppData\Local`, `C:\Users\ada\AppData\Roaming`
+	layout, err := install.LayoutFor(install.Platform{OS: "windows", LocalAppData: local, AppData: roaming})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// NSIS paths use backslashes; LayoutFor joins with this platform's
+	// separator.
+	under := func(root, nsisPath string) string {
+		return filepath.Join(append([]string{root}, strings.Split(nsisPath, `\`)...)...)
+	}
+	match := regexp.MustCompile(`(?m)^InstallDir "\$LOCALAPPDATA\\([^"]+)"$`).FindStringSubmatch(nsi)
+	if match == nil {
+		t.Fatal(`project.nsi has no InstallDir "$LOCALAPPDATA\..."`)
+	}
+	dir := under(local, match[1])
+	if got := filepath.Join(dir, project.Name+".exe"); got != layout.App.Installed {
+		t.Errorf("the installer puts the app at %s, inkunactl install at %s", got, layout.App.Installed)
+	}
+	if got := filepath.Join(dir, "inkunactl.exe"); got != layout.CLI.Installed {
+		t.Errorf("the installer puts inkunactl at %s, inkunactl install at %s", got, layout.CLI.Installed)
+	}
+	if !strings.Contains(nsi, `File "/oname=inkunactl.exe"`) {
+		t.Error("the installer does not install inkunactl.exe")
+	}
+
+	shortcut := regexp.MustCompile(`(?m)^\s*CreateShortcut "\$SMPROGRAMS\\([^"]+)"`).FindAllStringSubmatch(nsi, -1)
+	if len(shortcut) != 1 {
+		t.Fatalf("project.nsi makes %d Start menu shortcuts, want 1", len(shortcut))
+	}
+	if got := under(filepath.Join(roaming, "Microsoft", "Windows", "Start Menu", "Programs"), shortcut[0][1]); got != layout.Shortcut {
+		t.Errorf("the installer's shortcut is %s, inkunactl install's %s", got, layout.Shortcut)
 	}
 }
 
