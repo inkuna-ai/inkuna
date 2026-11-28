@@ -1,5 +1,10 @@
 /bin/
 /build/bin/
+# wails build -nsis writes these from wails.json each time.
+/build/windows/installer/wails_tools.nsh
+/build/windows/installer/tmp/
+# The release downloads, made by release.yml.
+/dist/
 /frontend/dist/
 /frontend/node_modules/
 /frontend/package.json.md5

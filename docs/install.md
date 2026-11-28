@@ -1,6 +1,6 @@
 ---
 title: Installing Inkuna
-lastUpdated: 2026-11-25
+lastUpdated: 2026-11-27
 author: Brandon Manning
 tags: [install, update, release, inkunactl, config]
 status: current
@@ -8,7 +8,27 @@ status: current
 
 # Installing and updating Inkuna
 
-`inkunactl install` is the guided way to install Inkuna on macOS, Linux, or Windows. It checks what Inkuna needs and offers to install what is missing, writes the configuration when there is none, builds the app and `inkunactl` from a checkout of the repository, puts them in place, and adds `inkunactl` to `PATH`. It says what each step will do and asks first. It runs only user-level commands you agree to, never `sudo`, and never through a shell. `inkunactl update` brings an install up to date with its channel, the newest release or `origin/main`, and `inkunactl update --rollback` goes back to the build it replaced ([Updating](#updating)).
+`inkunactl install` is the guided way to install Inkuna on macOS, Linux, or Windows. It checks what Inkuna needs and offers to install what is missing, writes the configuration when there is none, builds the app and `inkunactl` from a checkout of the repository, puts them in place, and adds `inkunactl` to `PATH`. It says what each step will do and asks first. It runs only user-level commands you agree to, never `sudo`, and never through a shell. `inkunactl update` brings an install up to date with its channel, the newest release or `origin/main`, and `inkunactl update --rollback` goes back to the build it replaced ([Updating](#updating)). Each release also has downloads for each platform, which need none of the build's prerequisites ([Downloading a release](#downloading-a-release)).
+
+## Downloading a release
+
+Each [release](https://github.com/inkuna-ai/inkuna/releases) carries the app and `inkunactl` built for macOS, Windows, and Linux. `.github/workflows/release.yml` builds them on each platform's GitHub runner when a `vX.Y.Z` tag is pushed on `main`, and names them by `info.productVersion` in `wails.json`, which the tag must match.
+
+| Platform | Files | Installing |
+| --- | --- | --- |
+| macOS, Apple silicon and Intel | `Inkuna-<version>-macos-universal.dmg`, `inkunactl-<version>-macos-universal.tar.gz` | Open the disk image and drag Inkuna to Applications. Put `inkunactl` from the archive in `~/.local/bin`. |
+| Windows, x86-64 | `Inkuna-<version>-windows-amd64-installer.exe` | Run the installer. |
+| Linux, x86-64 | `inkuna-<version>-linux-amd64.tar.gz` | Extract it, and put `inkuna` and `inkunactl` in `~/.local/bin`. |
+
+Every download also holds `LICENSE.md`, `NOTICE`, and `THIRD_PARTY_NOTICES`. The release lists `SHA256SUMS`, the SHA-256 of each file (`shasum -a 256 --check --ignore-missing SHA256SUMS`). Each file also has a GitHub build attestation, so `gh attestation verify <file> --repo inkuna-ai/inkuna` checks that this repository's release workflow built it.
+
+- **macOS.** The app and `inkunactl` each hold both architectures, joined with `lipo`. They are signed ad hoc, not with a Developer ID, and not notarized. So the first time it opens, macOS says it cannot verify Inkuna, and **Open Anyway** in System Settings > Privacy & Security opens it from then on.
+- **Windows.** The installer is the NSIS script in `build/windows/installer/project.nsi`, built by `wails build -nsis`. It installs for the current user, without administrator rights, into `%LOCALAPPDATA%\Programs\Inkuna`, the folder `inkunactl install` uses, with the same Start menu shortcut. `package_test.go` fails the build when the two drift apart. It installs the WebView2 runtime when it is missing, and registers an uninstaller in Settings > Apps, which removes the program and its shortcut but not the configuration, the database, or keychain secrets. It does not change `PATH`: to run `inkunactl` from any terminal, add that folder to your user `PATH`. The installer is not signed, so SmartScreen may ask you to confirm it (**More info**, then **Run anyway**).
+- **Linux.** The build runs on Ubuntu 22.04, so it needs glibc 2.35 or later, and the GTK 3 and WebKitGTK 4.1 runtime libraries (`sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0` on Ubuntu). The archive holds the app icon as `inkuna.png` for a desktop entry of your own. There is no `.deb` yet.
+
+`inkunactl update` updates only an install `inkunactl install` made, since it builds from that install's checkout. For a download, it finds no [install record](#the-install-record) and says to run `inkunactl install`, which builds from source and replaces the download in place, because both use the same locations. Otherwise, update a download by installing the next release over it.
+
+A pull request that changes `release.yml`, `build/`, `wails.json`, or `Taskfile.yml` builds every download without publishing anything, so a broken package shows before a tag. The files are attached to that workflow run.
 
 ## Running it
 

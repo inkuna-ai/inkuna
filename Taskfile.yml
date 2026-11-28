@@ -77,7 +77,7 @@ tasks:
       - go test ./...
 
   build:go:
-    internal: true
+    desc: Build inkunactl into bin/, for GOARCH when it is set
     cmds:
       # Quoted, since inkunactl install builds in a checkout under the data
       # directory, which on macOS is under Application Support.
@@ -104,13 +104,13 @@ tasks:
       - task: build:go
 
   package:
-    desc: Package the native desktop application
+    desc: Package the native desktop application (flags after -- go to wails build, as release.yml passes -platform darwin/universal or -nsis)
     cmds:
       # Current Linux distributions ship WebKitGTK 4.1, not the 4.0 Wails
       # builds against by default.
-      - cmd: go tool wails build -tags webkit2_41 -ldflags '{{.LDFLAGS}}'
+      - cmd: go tool wails build -tags webkit2_41 -ldflags '{{.LDFLAGS}}' {{.CLI_ARGS}}
         platforms: [linux]
-      - cmd: go tool wails build -ldflags '{{.LDFLAGS}}'
+      - cmd: go tool wails build -ldflags '{{.LDFLAGS}}' {{.CLI_ARGS}}
         platforms: [darwin, windows]
 
   ci:
